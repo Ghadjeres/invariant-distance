@@ -165,7 +165,7 @@ class InvariantDistance(SequentialModel):
 
         # TODO add repr_size
         self.lstm_d = nn.LSTM(
-            input_size=self.num_lstm_units + self.embedding_dim,
+            input_size=self.num_lstm_units + self.embedding_dim + 1,
             hidden_size=self.num_lstm_units,
             num_layers=self.num_layers,
             dropout=dropout_prob)
@@ -190,9 +190,11 @@ class InvariantDistance(SequentialModel):
         hidden = self.hidden_init(batch_size,
                                   self.num_lstm_units
                                   )
+
         weights, softmax = self.decode(hidden_repr=mean,
                                        first_note=first_note,
-                                       hidden=hidden)
+                                       hidden=hidden,
+                                       sequence_length=seq_length)
         return weights, softmax, diff
 
     def hidden_repr(self, input, hidden):
@@ -209,7 +211,7 @@ class InvariantDistance(SequentialModel):
         else:
             return last_output
 
-    def decode(self, hidden_repr, first_note, hidden):
+    def decode(self, hidden_repr, first_note, hidden, sequence_length):
         """
 
         :param hidden_repr:(batch_size, hidden_repr_size)
@@ -224,12 +226,21 @@ class InvariantDistance(SequentialModel):
         input = torch.cat((hidden_repr,
                            embedded_note),
                           1)
-        input_size = input.size()
 
-        input_as_seq = torch.cat((
-            input[None, :, :],
-            Variable(torch.zeros((self.timesteps - 1,) + input_size).cuda())
-        ), 0)
+        no_data = self.no_data_init(seq_length=sequence_length,
+                                    batch_size=batch_size,
+                                    input_size=input.size()[1])
+        # input_size = input.size()
+        # input_as_seq = torch.cat((
+        #     input[None, :, :],
+        #     Variable(torch.zeros((self.timesteps - 1,) + input_size).cuda())
+        # ), 0)
+
+        input_extended = torch.cat(
+            (input[None, :, :], Variable(torch.zeros(1, batch_size, 1).cuda(
+            ))), 2)
+        input_as_seq = torch.cat(
+            [input_extended, no_data], 0)
 
         output_lstm, _ = self.lstm_d(input_as_seq, hidden)
         weights = [self.linear_out(time_slice) for time_slice in output_lstm]
@@ -250,12 +261,12 @@ class InvariantDistance(SequentialModel):
                            volatile=volatile))
         return hidden
 
-    def no_data_init(self, seq_length, batch_size,
-                     hidden_dim=None,
+    def no_data_init(self, seq_length,
+                     batch_size,
+                     input_size,
                      volatile=False) -> Variable:
-
         no_data = Variable(torch.cat(
-            (torch.zeros(seq_length - 1, batch_size, hidden_dim),
+            (torch.zeros(seq_length - 1, batch_size, input_size),
              torch.ones(seq_length - 1, batch_size, 1)), 2).cuda(),
                            volatile=volatile)
         return no_data
@@ -334,14 +345,16 @@ class InvariantDistance(SequentialModel):
                                                      replace=True, size=3)
 
             # there's padding of size timesteps before and after
-            chorale_length = len(chorales[0][0][SOP_INDEX]) + 2 * self.timesteps
+            chorale_length = len(
+                chorales[0][0][SOP_INDEX]) + 2 * self.timesteps
             time_index = np.random.randint(0,
                                            chorale_length - self.timesteps)
             for seq_index, seq_list in enumerate(sequences):
                 transposition_index = transposition_indexes[seq_index]
-                seq, _, offset = np.array(chorales[transposition_index])
+                indexed_chorale, _, offset = np.array(
+                    chorales[transposition_index])
                 # padding of size timesteps
-                chunk = self.numpy_indexed2chunk(seq,
+                chunk = self.numpy_indexed2chunk(indexed_chorale,
                                                  start_symbols,
                                                  end_symbols,
                                                  time_index)
