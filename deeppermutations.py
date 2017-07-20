@@ -93,7 +93,7 @@ if __name__ == '__main__':
     num_dense = args.num_dense
 
     train = args.train > 0
-    nb_epochs = args.train
+    num_epochs = args.train
     overwrite = args.overwrite
 
     # create dataset if doesn't exist
@@ -112,8 +112,7 @@ if __name__ == '__main__':
     distance_model_kwargs = dict(
         reg='l2',
         # reg=None,
-        # dropout_prob=0.2
-        dropout_prob=None,
+        dropout_prob=0.3,
         lambda_reg=1e-5,
         num_layers=2,
         num_units_lstm=512,
@@ -122,6 +121,7 @@ if __name__ == '__main__':
     invariant_distance = InvariantDistance(
         dataset_name=pickle_filepath,
         timesteps=timesteps,
+        num_pitches=55,
         **distance_model_kwargs
     )
 
@@ -130,16 +130,14 @@ if __name__ == '__main__':
     #                                    )
     # next(gen)
 
-    model_manager = ModelManager
-
+    model_manager = ModelManager(model=invariant_distance)
     if train:
-        invariant_distance.train(batch_size=256,
-                                 nb_epochs=98,
-                                 steps_per_epoch=128,
-                                 validation_steps=8,
-                                 overwrite=True,
-                                 effective_timestep=32,
-                                 percentage_train=0.9)
+        model_manager.train_model(batch_size=batch_size,
+                                  num_epochs=num_epochs,
+                                  batches_per_epoch=batches_per_epoch,
+                                  plot=True
+                                  )
+
 
     # invariant_distance_model.find_nearests(
     #     next(invariant_distance_model.generator(batch_size=1,
@@ -151,11 +149,11 @@ if __name__ == '__main__':
     # invariant_distance_model.show_preds(effective_timestep=32)
     # invariant_distance_model.test_transpose_out_of_bounds(
     #     effective_timestep=32)
-    invariant_distance_model.show_distance_matrix(chorale_index=241,
-                                                  time_index=32,
-                                                  show_plotly=True)
+    # invariant_distance_model.show_distance_matrix(chorale_index=241,
+    #                                               time_index=32,
+    #                                               show_plotly=True)
     # invariant_distance_model.show_mean_distance_matrix(chorale_index=0,
     #                                                    show_plotly=True)
-    invariant_distance_model.compute_stats(chorale_index=0, num_elements=1000)
+    # invariant_distance_model.compute_stats(chorale_index=0, num_elements=1000)
     # invariant_distance_model.show_all_absolute_preds(effective_timestep=32)
     exit()

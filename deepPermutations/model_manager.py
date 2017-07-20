@@ -95,6 +95,7 @@ def accuracy(output_seq, targets_seq):
 class ModelManager():
     def __init__(self, model, lr=1e-3):
         self.model = model
+        self.model.cuda()
         self.optimizer = torch.optim.Adam(
             self.model.parameters(),
             lr=lr)
@@ -112,9 +113,9 @@ class ModelManager():
         mean_accuracy = 0
         mean_reg = 0
         if train:
-            self.train()
+            self.model.train()
         else:
-            self.eval()
+            self.model.eval()
         for sample_id, next_element in tqdm(
                 enumerate(islice(generator, batches_per_epoch))):
             mce_loss, grad_reg, acc = self.loss_and_acc(
@@ -131,21 +132,23 @@ class ModelManager():
                 mean_accuracy / batches_per_epoch)
 
     def loss_and_acc(self, next_element, reg_norm, train):
-        input_seq, input_seq_index = next_element
 
         # to cuda
-        input_seq, input_seq_index = (
-            Variable(torch.LongTensor(input_seq).cuda()),
-            Variable(torch.LongTensor(input_seq_index).cuda())
-        )
+        next_element_cuda = [
+            Variable(tensor.cuda())
+            for tensor in next_element
+        ]
+
+        input_1, input_2, first_note, output = next_element_cuda
 
         self.optimizer.zero_grad()
 
         # forward pass
-        weights, softmax, z = self.model.forward(x=input_seq, g=g)
+        inputs = (input_1, input_2)
+        weights, softmax, diff = self.model.forward(inputs, first_note)
 
         # mce_loss
-        mce_loss = crossentropy_loss(weights, input_seq_index)
+        mce_loss = crossentropy_loss(weights, output)
 
         # compute loss
         loss = mce_loss
@@ -161,18 +164,18 @@ class ModelManager():
             self.optimizer.step()
 
         # accuracy
-        acc = accuracy(weights, input_seq_index)
+        acc = accuracy(weights, output)
 
         # compute mean loss and accuracy
         return (variable2float(mce_loss),
-                variable2float(grad_reg),
+                # variable2float(grad_reg),
+                0.,
                 acc)
 
     def train_model(self,
                     batch_size,
                     batches_per_epoch,
                     num_epochs,
-                    sequence_length,
                     plot=False,
                     save_every=10,
                     reg_norm=None):

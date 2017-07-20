@@ -5,14 +5,13 @@ from itertools import islice
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from deepPermutations.data_preprocessing import SOP_INDEX
-from deepPermutations.data_utils import START_SYMBOL, END_SYMBOL, to_onehot, \
+from deepPermutations.data_utils import START_SYMBOL, END_SYMBOL, \
     first_note_index
 from torch import nn
 from torch.autograd import Variable
 from tqdm import tqdm
-
-import torch.nn.functional as F
 
 
 class SequentialModel(nn.Module):
@@ -22,7 +21,9 @@ class SequentialModel(nn.Module):
 
     def __init__(self, model_type: str, dataset_name: str,
                  num_pitches=None,
-                 timesteps=16, **kwargs):
+                 timesteps=16,
+                 **kwargs):
+        super(SequentialModel, self).__init__()
         self.num_pitches = num_pitches
         self.timesteps = timesteps
         self.num_voices = 1
@@ -155,10 +156,11 @@ class InvariantDistance(SequentialModel):
                               dropout=dropout_prob)
 
         # TODO add repr_size
-        self.lstm_d = nn.LSTM(input_size=self.num_lstm_units + self.num_pitches,
-                              hidden_size=self.num_lstm_units,
-                              num_layers=self.num_layers,
-                              dropout=dropout_prob)
+        self.lstm_d = nn.LSTM(
+            input_size=self.num_lstm_units + self.embedding_dim,
+            hidden_size=self.num_lstm_units,
+            num_layers=self.num_layers,
+            dropout=dropout_prob)
 
         self.linear_out = nn.Linear(in_features=self.num_lstm_units,
                                     out_features=num_pitches)
@@ -168,35 +170,43 @@ class InvariantDistance(SequentialModel):
         batch_size, seq_length = inputs[0].size()
         assert seq_length == self.timesteps
 
-        hiddens = [self.hidden_init(batch_size)
-                   for _ in len(inputs)]
-        hidden_repr_1, hidden_repr_2 = self.hidden_repr(inputs, hiddens)
+        hiddens = [self.hidden_init(batch_size, self.num_lstm_units)
+                   for _ in range(len(inputs))]
+        hidden_reprs = [self.hidden_repr(input, hidden)
+                        for input, hidden in zip(inputs, hiddens)]
 
+        hidden_repr_1, hidden_repr_2 = hidden_reprs
         diff = hidden_repr_1 - hidden_repr_2
         mean = (hidden_repr_1 + hidden_repr_2) / 2
 
         hidden = self.hidden_init(batch_size,
+                                  self.num_lstm_units
                                   )
-        weights, softmax = self.decode(hidden_repr=mean, hidden=hidden)
+        weights, softmax = self.decode(hidden_repr=mean,
+                                       first_note=first_note,
+                                       hidden=hidden)
         return weights, softmax, diff
 
-    def hidden_repr(self, inputs, hiddens):
+    def hidden_repr(self, input, hidden):
         # todo check dimensions
-        embeddings = [self.embedding(input) for input in inputs]
-        outputs_lstm = [self.lstm_e(input)[-1]
-                        for input, hidden in zip(embeddings, hiddens)]
+        embedding = self.embedding(input)
+        embedding_time_major = torch.transpose(
+            embedding, 0, 1)
+
+        outputs_lstm, _ = self.lstm_e(embedding_time_major, hidden)
+        last_output = outputs_lstm[-1]
 
         if self.non_linearity:
             NotImplementedError
         else:
-            return outputs_lstm
+            return last_output
 
     def decode(self, hidden_repr, first_note, hidden):
         """
 
         :param hidden_repr:(batch_size, hidden_repr_size)
         :type hidden_repr:
-        :return:
+        :return:(timestep, batch_size, num_pitches)
         :rtype:
         """
         # transform input as seq
@@ -206,32 +216,29 @@ class InvariantDistance(SequentialModel):
         input = torch.cat((hidden_repr,
                            embedded_note),
                           1)
+        input_size = input.size()
 
         input_as_seq = torch.cat((
             input[None, :, :],
-            self.no_data_init(seq_length=self.timesteps,
-                              hidden_dim=hidden_repr + self.num_pitches,
-                              batch_size=batch_size
-                              ), 0
-        )
-        )
+            Variable(torch.zeros((self.timesteps - 1,) + input_size).cuda())
+        ), 0)
 
-        output_lstm = self.lstm_d(input_as_seq, hidden)
-        weights = [self.linear_out(output_lstm) for time_slice in output_lstm]
+        output_lstm, _ = self.lstm_d(input_as_seq, hidden)
+        weights = [self.linear_out(time_slice) for time_slice in output_lstm]
         softmax = [F.softmax(time_slice) for time_slice in weights]
         softmax = torch.cat(softmax)
-        softmax = softmax.view(self.timesteps, batch_size, self.num_features)
+        softmax = softmax.view(self.timesteps, batch_size, self.num_pitches)
 
         weights = torch.cat(weights)
-        weights = weights.view(self.timesteps, batch_size, self.num_features)
+        weights = weights.view(self.timesteps, batch_size, self.num_pitches)
         return weights, softmax
 
-    def hidden_init(self, batch_size, volatile=False) -> Variable:
+    def hidden_init(self, batch_size, hidden_size, volatile=False) -> Variable:
         hidden = (Variable(torch.rand(self.num_layers, batch_size,
-                                      self.num_lstm_units).cuda(),
+                                      hidden_size).cuda(),
                            volatile=volatile),
                   Variable(torch.rand(self.num_layers, batch_size,
-                                      self.num_lstm_units).cuda(),
+                                      hidden_size).cuda(),
                            volatile=volatile))
         return hidden
 
@@ -245,11 +252,11 @@ class InvariantDistance(SequentialModel):
                            volatile=volatile)
         return no_data
 
-    def numpy_indexed2onehot_chunk(self, indexed_chorale,
-                                   start_symbols,
-                                   end_symbols,
-                                   num_pitches,
-                                   time_index):
+    def numpy_indexed2chunk(self, indexed_chorale,
+                            start_symbols,
+                            end_symbols,
+                            num_pitches,
+                            time_index):
         """
 
         :param indexed_chorale:
@@ -268,13 +275,9 @@ class InvariantDistance(SequentialModel):
             (np.full(padding_dimensions, start_symbols),
              indexed_chorale[SOP_INDEX],
              np.full(padding_dimensions, end_symbols)),
-            axis=0)
+            axis=0).astype(np.long)
 
-        # to onehot
-        input_seq = np.array(
-            list(map(lambda x: to_onehot(x, num_pitches), input_seq)))
-
-        return input_seq[time_index: time_index + self.timesteps, :]
+        return input_seq[time_index: time_index + self.timesteps]
 
     def generator(self, batch_size, phase, percentage_train=0.8,
                   effective_timestep=None):
@@ -307,9 +310,7 @@ class InvariantDistance(SequentialModel):
         else:
             NotImplementedError
 
-        input_offsets = []
         first_notes = []
-
         sequences = [[] for _ in range(3)]
 
         batch = 0
@@ -326,19 +327,20 @@ class InvariantDistance(SequentialModel):
             transposition_indexes = np.random.choice(len(chorales),
                                                      replace=True, size=3)
 
+
+            # there's padding of size timesteps before and after
+            chorale_length = len(chorales[0][0]) + 2 * self.timesteps
+            time_index = np.random.randint(0,
+                                           chorale_length - self.timesteps)
             for seq_index, seq_list in enumerate(sequences):
                 transposition_index = transposition_indexes[seq_index]
                 seq, _, offset = np.array(chorales[transposition_index])
-
                 # padding of size timesteps
-                chorale_length = len(seq) + 2 * self.timesteps
-                time_index = np.random.randint(0,
-                                               chorale_length - self.timesteps)
-                onehot_chunk = self.numpy_indexed2onehot_chunk(seq,
-                                                               start_symbols,
-                                                               end_symbols,
-                                                               num_pitches,
-                                                               time_index)
+                onehot_chunk = self.numpy_indexed2chunk(seq,
+                                                        start_symbols,
+                                                        end_symbols,
+                                                        num_pitches,
+                                                        time_index)
                 seq_list.append(onehot_chunk)
 
             # find first note symbol of output seq (last sequence in sequences)
@@ -348,21 +350,21 @@ class InvariantDistance(SequentialModel):
                                                            note2index=
                                                            note2indexes[
                                                                SOP_INDEX])
-            first_note_output_seq = to_onehot(first_note_index_output_seq,
-                                              num_indexes=num_pitches)
-            first_notes.append(first_note_output_seq)
+            first_notes.append(first_note_index_output_seq)
 
             batch += 1
             # if there is a full batch
             if batch == batch_size:
                 torch_sequences = [torch.from_numpy(np.array(chunk))
                                    for chunk in sequences]
-                torch_first_notes = torch.from_numpy(np.array(first_notes))
+                torch_first_notes = torch.from_numpy(np.array(first_notes,
+                                                              dtype=np.long))
 
-                # inputs, output, first_note
-                next_element = ((torch_sequences[0], torch_sequences[1]),
+                # input_1, input_2, first_note, output
+                next_element = (torch_sequences[0],
+                                torch_sequences[1],
+                                torch_first_notes,
                                 torch_sequences[2],
-                                torch_first_notes
                                 )
                 yield next_element
 
