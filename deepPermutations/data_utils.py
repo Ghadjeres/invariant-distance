@@ -6,7 +6,7 @@ Created on 7 mars 2016
 @author: Gaetan Hadjeres
 """
 import pickle
-
+import os
 import numpy as np
 from music21 import corpus, converter, stream, note, duration, interval
 from music21.analysis.floatingKey import FloatingKeyException
@@ -22,6 +22,7 @@ BASS = 1
 
 OCTAVE = 12
 
+PACKAGE_DIR = os.path.realpath(os.path.dirname(__file__))
 BACH_DATASET = 'datasets/raw_dataset/bach_dataset.pickle'
 
 voice_ids_default = list(range(NUM_VOICES))  # soprano, alto, tenor, bass

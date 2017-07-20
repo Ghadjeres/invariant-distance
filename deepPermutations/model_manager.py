@@ -5,6 +5,8 @@ from torch import nn
 from torch.autograd import Variable
 from tqdm import tqdm
 
+from deepPermutations.sequential_model import SequentialModel
+
 
 def variable2float(v: Variable):
     return float(v.data.cpu().numpy())
@@ -92,8 +94,8 @@ def accuracy(output_seq, targets_seq):
     return sum / seq_length
 
 
-class ModelManager():
-    def __init__(self, model, lr=1e-3):
+class ModelManager:
+    def __init__(self, model: SequentialModel, lr=1e-3):
         self.model = model
         self.model.cuda()
         self.optimizer = torch.optim.Adam(

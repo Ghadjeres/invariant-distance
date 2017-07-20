@@ -6,6 +6,8 @@ from itertools import islice
 import numpy as np
 import torch
 import torch.nn.functional as F
+
+from deepPermutations.data_utils import PACKAGE_DIR
 from deepPermutations.data_preprocessing import SOP_INDEX
 from deepPermutations.data_utils import START_SYMBOL, END_SYMBOL, \
     first_note_index
@@ -42,7 +44,11 @@ class SequentialModel(nn.Module):
         od = collections.OrderedDict(sorted(self.kwargs.items()))
         params_string = '_'.join(
             ['='.join(x) for x in zip(od.keys(), map(str, od.values()))])
-        self.filepath = f'models/{self.model_type}_{params_string}.h5'
+
+        self.filepath = os.path.join(PACKAGE_DIR,
+                                     f'models/{self.model_type}_'
+                                     f'{params_string}.h5'
+                                     )
 
     def __str__(self):
         return self.filepath
@@ -71,6 +77,8 @@ class SequentialModel(nn.Module):
         :param features:
         :return: features produced by generator that achieve minimum distance
         """
+        # TODO
+        NotImplementedError
         # max_dist = -10
         max_dist = 100000
         num_pitches = list(map(len, self.dataset[3]))
@@ -279,16 +287,16 @@ class InvariantDistance(SequentialModel):
 
         return input_seq[time_index: time_index + self.timesteps]
 
-    def generator(self, batch_size, phase, percentage_train=0.8,
-                  effective_timestep=None):
+    def generator(self, batch_size, phase, percentage_train=0.8):
         """
 
         :param batch_size:
         :param phase:
         :param percentage_train:
-        :param effective_timestep:
         :return:
         """
+        # TODO effective timesteps?
+
         X, voice_ids, index2notes, note2indexes, metadatas = pickle.load(
             open(self.dataset_filepath, 'rb'))
         num_pitches = list(map(lambda x: len(x), index2notes))[SOP_INDEX]
@@ -320,36 +328,33 @@ class InvariantDistance(SequentialModel):
             chorales = X[chorale_index]
             if len(chorales) == 1:
                 continue
-            if not effective_timestep:
-                effective_timestep = np.random.randint(min(8, self.timesteps),
-                                                       self.timesteps + 1)
-
+            # if not effective_timestep:
+            #     effective_timestep = np.random.randint(min(8, self.timesteps),
+            #                                            self.timesteps + 1)
             transposition_indexes = np.random.choice(len(chorales),
                                                      replace=True, size=3)
-
 
             # there's padding of size timesteps before and after
             chorale_length = len(chorales[0][0]) + 2 * self.timesteps
             time_index = np.random.randint(0,
-                                           chorale_length - self.timesteps)
+                                           chorale_length + self.timesteps)
             for seq_index, seq_list in enumerate(sequences):
                 transposition_index = transposition_indexes[seq_index]
                 seq, _, offset = np.array(chorales[transposition_index])
                 # padding of size timesteps
-                onehot_chunk = self.numpy_indexed2chunk(seq,
-                                                        start_symbols,
-                                                        end_symbols,
-                                                        num_pitches,
-                                                        time_index)
-                seq_list.append(onehot_chunk)
+                chunk = self.numpy_indexed2chunk(seq,
+                                                 start_symbols,
+                                                 end_symbols,
+                                                 num_pitches,
+                                                 time_index)
+                seq_list.append(chunk)
 
             # find first note symbol of output seq (last sequence in sequences)
-            first_note_index_output_seq = first_note_index(seq[SOP_INDEX],
-                                                           time_index_start=time_index + self.timesteps - effective_timestep,
-                                                           time_index_end=time_index + self.timesteps,
-                                                           note2index=
-                                                           note2indexes[
-                                                               SOP_INDEX])
+            first_note_index_output_seq = \
+                first_note_index(chunk,
+                                 time_index_start=0,
+                                 time_index_end=self.timesteps,
+                                 note2index=note2indexes[SOP_INDEX])
             first_notes.append(first_note_index_output_seq)
 
             batch += 1
