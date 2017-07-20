@@ -263,7 +263,6 @@ class InvariantDistance(SequentialModel):
     def numpy_indexed2chunk(self, indexed_chorale,
                             start_symbols,
                             end_symbols,
-                            num_pitches,
                             time_index):
         """
 
@@ -335,9 +334,9 @@ class InvariantDistance(SequentialModel):
                                                      replace=True, size=3)
 
             # there's padding of size timesteps before and after
-            chorale_length = len(chorales[0][0]) + 2 * self.timesteps
+            chorale_length = len(chorales[0][0][SOP_INDEX]) + 2 * self.timesteps
             time_index = np.random.randint(0,
-                                           chorale_length + self.timesteps)
+                                           chorale_length - self.timesteps)
             for seq_index, seq_list in enumerate(sequences):
                 transposition_index = transposition_indexes[seq_index]
                 seq, _, offset = np.array(chorales[transposition_index])
@@ -345,7 +344,6 @@ class InvariantDistance(SequentialModel):
                 chunk = self.numpy_indexed2chunk(seq,
                                                  start_symbols,
                                                  end_symbols,
-                                                 num_pitches,
                                                  time_index)
                 seq_list.append(chunk)
 

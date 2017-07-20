@@ -1,6 +1,8 @@
 import argparse
 import os
 
+import pickle
+
 from deepPermutations.data_preprocessing import \
     initialize_transposition_dataset
 from deepPermutations.sequential_model import InvariantDistance
@@ -108,6 +110,8 @@ if __name__ == '__main__':
             dataset_dir=None,
             metadatas=metadatas)
 
+    # _, _, index2notes, _, _ = pickle.load(open(pickle_filepath, 'rb'))
+
     # INVARIANT DISTANCE
     distance_model_kwargs = dict(
         reg='l2',
@@ -131,7 +135,9 @@ if __name__ == '__main__':
     # next(gen)
 
     model_manager = ModelManager(model=invariant_distance,
-                                 lr=1e-4)
+                                 lr=1e-4,
+                                 lambda_reg=1.e-2
+                                 )
     model_manager.load()
     if train:
         model_manager.train_model(batch_size=batch_size,
@@ -139,7 +145,7 @@ if __name__ == '__main__':
                                   batches_per_epoch=batches_per_epoch,
                                   plot=True,
                                   save_every=2,
-
+                                  reg_norm=2
                                   )
 
     # invariant_distance_model.find_nearests(
