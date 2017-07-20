@@ -29,29 +29,6 @@ from .distance_models import seq2seq, invariant_seq2seq, \
 from .generation_models import deepbach_skip_sop
 from .permutation import spearman_rho, chorale_onehot_to_indexed_chorale
 
-SEQ = 0
-META = 1
-OFFSET = 2
-
-
-def first_note_index(indexed_seq, time_index_start, time_index_end,
-                     note2index):
-    symbols = [note2index[s] for s in [START_SYMBOL, END_SYMBOL, SLUR_SYMBOL]]
-    for t in range(time_index_start, time_index_end):
-        if indexed_seq[t] not in symbols:
-            return indexed_seq[t]
-    return note2index[SLUR_SYMBOL]
-
-
-def onehot_fullname2onehot_pc(chorale, note_index2pc_index, num_pc):
-    chorale_onehot_pc = np.zeros(chorale.shape[:-1] + (num_pc,))
-    for voice_id, voice in enumerate(chorale):
-        for t, onehot_pitch in enumerate(voice):
-            pc_index = note_index2pc_index[np.argmax(onehot_pitch)]
-            chorale_onehot_pc[voice_id, t, pc_index] = 1
-
-    return chorale_onehot_pc
-
 
 class SequentialModel:
     def __init__(self, name: str, model_type: str, dataset_name: str,

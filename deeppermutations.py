@@ -3,6 +3,7 @@ import os
 
 from deepPermutations.data_preprocessing import \
     initialize_transposition_dataset
+from deepPermutations.sequential_model import InvariantDistance
 
 
 def get_arguments():
@@ -95,18 +96,18 @@ if __name__ == '__main__':
     overwrite = args.overwrite
 
     # create dataset if doesn't exist
-    dataset_name = 'datasets/transpose/bach_sop'
-    if not os.path.exists(dataset_name):
+    dataset_name = 'transpose/bach_sop'
+    rel_pickle_filepath = f'datasets/{dataset_name}.pickle'
+    pickle_filepath = f'deepPermutations/{rel_pickle_filepath}'
+    if not os.path.exists(pickle_filepath):
         from DeepBach.metadata import *
+
         metadatas = [TickMetadatas(SUBDIVISION), FermataMetadatas()]
-        initialize_transposition_dataset(metadatas=metadatas)
+        initialize_transposition_dataset(
+            dataset_dir=None,
+            metadatas=metadatas)
 
     # INVARIANT DISTANCE
-    # invariant_distance_model_name = 'seq2seq_large'
-    # invariant_distance_model_name = 'seq2seq_absolute_invariant'
-    # invariant_distance_model_name = 'seq2seq_absolute_invariant_reg'
-    # invariant_distance_model_name = 'seq2seq_absolute_invariant_reg_mean'
-    invariant_distance_model_name = 'seq2seq_absolute_invariant_reg_mean_relu'
     distance_model_kwargs = dict(
         reg='l2',
         # reg=None,
@@ -117,20 +118,24 @@ if __name__ == '__main__':
         num_units_lstm=512,
     )
 
-    invariant_distance_model = InvariantDistanceModel(
-        name=invariant_distance_model_name,
-        dataset_name=dataset_name,
-        timesteps=timesteps_distance,
+    invariant_distance = InvariantDistance(
+        dataset_name=pickle_filepath,
+        timesteps=timesteps,
         **distance_model_kwargs
     )
+
+    gen = invariant_distance.generator(batch_size=batch_size,
+                                       phase='all',
+                                       )
+    next(gen)
     if train:
-        invariant_distance_model.train(batch_size=256,
-                                       nb_epochs=98,
-                                       steps_per_epoch=128,
-                                       validation_steps=8,
-                                       overwrite=True,
-                                       effective_timestep=32,
-                                       percentage_train=0.9)
+        invariant_distance.train(batch_size=256,
+                                 nb_epochs=98,
+                                 steps_per_epoch=128,
+                                 validation_steps=8,
+                                 overwrite=True,
+                                 effective_timestep=32,
+                                 percentage_train=0.9)
 
     # invariant_distance_model.find_nearests(
     #     next(invariant_distance_model.generator(batch_size=1,

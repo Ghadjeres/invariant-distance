@@ -1,4 +1,6 @@
+import os
 import pickle
+from typing import List, Optional
 
 from DeepBach.metadata import *
 from music21 import converter, interval, corpus, stream, note, duration
@@ -12,22 +14,8 @@ from .data_utils import create_index_dicts, _min_max_midi_pitch, \
 SOP_INDEX = 0
 
 
-def to_pitch_class(note_str):
-    s = ''
-    for c in note_str:
-        if c not in ['#', '-']:
-            s = s + c
-    return s
-
-
-def to_onehot(index, num_indexes):
-    return np.array(index == np.arange(0, num_indexes),
-                    dtype=np.float32)
-
-
 def initialize_transposition_dataset(dataset_dir=None,
-                                     pickle_filepath=None,
-                                     metadatas=None):
+                                     metadatas: List[Metadata] = []):
     """
     Create 'datasets/transpose/bach_sop.pickle' or
     'datasets/transpose/custom_dataset.pickle'
@@ -38,6 +26,7 @@ def initialize_transposition_dataset(dataset_dir=None,
     :rtype:
     """
     from glob import glob
+    PACKAGE_DIR = os.path.dirname(__file__)
     NUM_VOICES = 1
     voice_ids = [SOP_INDEX]
     print('Creating dataset')
@@ -45,12 +34,17 @@ def initialize_transposition_dataset(dataset_dir=None,
         chorale_list = filter_file_list(
             glob(dataset_dir + '/*.mid') + glob(dataset_dir + '/*.xml'),
             num_voices=NUM_VOICES)
-        pickled_dataset = 'datasets/transpose/' + dataset_dir.split('/')[
-            -1] + '.pickle'
+        pickled_dataset = os.path.join(PACKAGE_DIR,
+                                       'datasets/transpose/' + \
+                                       dataset_dir.split(
+                                           '/')[
+                                           -1] + '.pickle')
     else:
         chorale_list = filter_file_list(
             corpus.getBachChorales(fileExtensions='xml'))
-        pickled_dataset = 'datasets/transpose/bach_sop.pickle'
+        pickled_dataset = os.path.join(PACKAGE_DIR,
+                                       'datasets/transpose/bach_sop.pickle'
+                                       )
 
     # remove wrong chorales:
     min_pitches, max_pitches = compute_min_max_pitches(chorale_list,
@@ -211,12 +205,3 @@ def indexed_seq_to_score(seq, index2note, note2index):
     part.append(f)
     score.insert(part)
     return score
-
-
-if __name__ == '__main__':
-    # metadatas = [TickMetadatas(SUBDIVISION), FermataMetadatas(), KeyMetadatas(window_size=1)]
-
-
-    # Export to txt
-    # chorale_list = filter_file_list(corpus.getBachChorales(fileExtensions='xml'))
-    # export_dataset(chorale_list, [SOP_INDEX], '/home/gaetan/data/chorales_txt/chorales.txt')
