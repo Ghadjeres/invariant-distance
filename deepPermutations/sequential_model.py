@@ -1,6 +1,7 @@
 import collections
 import os
 import pickle
+from itertools import islice
 
 import numpy as np
 import torch
@@ -8,6 +9,10 @@ from deepPermutations.data_preprocessing import SOP_INDEX
 from deepPermutations.data_utils import START_SYMBOL, END_SYMBOL, to_onehot, \
     first_note_index
 from torch import nn
+from torch.autograd import Variable
+from tqdm import tqdm
+
+import torch.nn.functional as F
 
 
 class SequentialModel(nn.Module):
@@ -16,7 +21,9 @@ class SequentialModel(nn.Module):
     """
 
     def __init__(self, model_type: str, dataset_name: str,
+                 num_pitches=None,
                  timesteps=16, **kwargs):
+        self.num_pitches = num_pitches
         self.timesteps = timesteps
         self.num_voices = 1
         self.kwargs = kwargs
@@ -47,176 +54,6 @@ class SequentialModel(nn.Module):
 
     def generator(self, batch_size, phase, percentage_train=0.8, **kwargs):
         raise NotImplementedError
-
-    def loss_and_acc_on_epoch(self, batches_per_epoch, generator, train=True,
-                              reg_mat=None, reg_norm='l1'):
-
-        mean_mce_loss = 0
-        mean_accuracy = 0
-        mean_reg = 0
-        if train:
-            self.train()
-        else:
-            self.eval()
-        for sample_id, next_element in tqdm(
-                enumerate(islice(generator, batches_per_epoch))):
-            mce_loss, grad_reg, acc = self.loss_and_acc(reg_mat,
-                                                        next_element,
-                                                        reg_norm,
-                                                        train=train)
-
-            mean_mce_loss += mce_loss
-            mean_reg += grad_reg
-            mean_accuracy += acc
-
-        return (mean_mce_loss / batches_per_epoch,
-                mean_reg / batches_per_epoch,
-                mean_accuracy / batches_per_epoch)
-
-    def loss_and_acc(self, reg_mat, next_element, reg_norm, train):
-        input_seq, input_seq_index = next_element
-
-        g = Variable(reg_mat.cuda())
-
-        # to cuda
-        input_seq, input_seq_index = (
-            Variable(torch.LongTensor(input_seq).cuda()),
-            Variable(torch.LongTensor(input_seq_index).cuda())
-        )
-
-        optimizer.zero_grad()
-
-        # forward pass
-        weights, softmax, z = self.forward(x=input_seq, g=g)
-
-        # mce_loss
-        mce_loss = crossentropy_loss(weights, input_seq_index)
-
-        # compute loss
-        loss = mce_loss
-
-        # regularization
-        if reg_norm is not None:
-            grad_reg = self.grad_reg(g, input_seq.size()[1], reg_norm, z)
-            loss += self.lambda_reg * grad_reg
-
-            # z regularization
-            # l2 norm on z:
-            z_reg = torch.pow(z, 2).sum(1).mean()
-            # l2 norm on z except for first dim
-            # z_reg = z
-            # z_reg[:, 0] = 0
-            # z_reg = torch.pow(z_reg, 2).sum(1).mean()
-
-            loss += z_reg
-
-        # backward pass and step
-        if train:
-            loss.backward()
-            optimizer.step()
-
-        # accuracy
-        acc = accuracy(weights, input_seq_index)
-
-        # compute mean loss and accuracy
-        return (variable2float(mce_loss),
-                variable2float(grad_reg),
-                acc)
-
-    def train(self, batch_size, nb_epochs, steps_per_epoch, validation_steps,
-              overwrite=True, **kwargs):
-        # generators
-        generator_train = self.generator(phase='train', batch_size=batch_size,
-                                         **kwargs)
-        generator_test = self.generator(phase='test', batch_size=batch_size,
-                                        **kwargs)
-        # train
-        self.model.fit_generator(generator=generator_train,
-                                 steps_per_epoch=steps_per_epoch,
-                                 epochs=nb_epochs,
-                                 validation_data=generator_test,
-                                 validation_steps=validation_steps,
-                                 callbacks=[
-                                     # EarlyStopping(min_delta=0.001, patience=5),
-                                     TensorBoard(log_dir='logs')]
-                                 )
-        self.model.save(self.filepath, overwrite=overwrite)
-        print('Model saved')
-        # update hidden_repr_model
-        self.hidden_repr_model = self._hidden_repr_model()
-
-    def train_model(self,
-                    batch_size,
-                    batches_per_epoch,
-                    num_epochs,
-                    sequence_length,
-                    plot=False,
-                    save_every=10,
-                    reg_norm=None):
-        generator_train = load_dataset(batch_size=batch_size,
-                                       timesteps=sequence_length,
-                                       phase='train')
-        generator_val = load_dataset(batch_size=batch_size,
-                                     timesteps=sequence_length,
-                                     phase='test')
-
-        reg_mat = load_regularization_mat(name='num_notes',
-                                          batch_size=batch_size,
-                                          timesteps=sequence_length)
-        # only to get res_size
-        res = self.loss_and_acc_on_epoch(
-            batches_per_epoch=1,
-            generator=generator_train,
-            train=True,
-            reg_mat=reg_mat,
-            reg_norm=reg_norm)
-        res_size = len(res)
-
-        if plot:
-            import matplotlib.pyplot as plt
-            fig, axarr = plt.subplots(res_size, sharex=True)
-            x = []
-            ys = [[] for _ in range(res_size)]
-            ys_val = [[] for _ in range(res_size)]
-            fig.show()
-
-        for epoch_index in range(num_epochs):
-            # train
-            res = self.loss_and_acc_on_epoch(
-                batches_per_epoch=batches_per_epoch,
-                generator=generator_train,
-                train=True,
-                reg_mat=reg_mat,
-                reg_norm=reg_norm)
-
-            # eval
-            res_val = self.loss_and_acc_on_epoch(
-                batches_per_epoch=batches_per_epoch // 10,
-                generator=generator_val,
-                train=False,
-                reg_mat=reg_mat,
-                reg_norm=reg_norm)
-
-            # plot
-            if plot:
-                x.append(epoch_index)
-                for res_index in range(res_size):
-                    y = res[res_index]
-                    ys[res_index].append(y)
-
-                    y_val = res_val[res_index]
-                    ys_val[res_index].append(y_val)
-
-                    axarr[res_index].plot(x, ys[res_index], 'r-',
-                                          x, ys_val[res_index], 'r--')
-                fig.canvas.draw()
-                plt.pause(0.001)
-
-            print(f"{',  '.join(map(str, res_val))}\n")
-
-            if (epoch_index + 1) % save_every == 0:
-                self.save()
-                print('Model saved')
 
     def save(self):
         torch.save(self.state_dict(), self.filepath)
@@ -288,14 +125,125 @@ class SequentialModel(nn.Module):
 
 
 class InvariantDistance(SequentialModel):
-    def __init__(self, dataset_name, timesteps, **kwargs):
+    def __init__(self,
+                 dataset_name,
+                 timesteps,
+                 num_units_lstm=256,
+                 num_pitches=None,
+                 dropout_prob=0.2,
+                 num_layers=1,
+                 embedding_dim=16,
+                 non_linearity=None,
+                 **kwargs):
         model_type = 'invariant_distance'
         super(InvariantDistance, self).__init__(model_type,
                                                 dataset_name,
+                                                num_pitches,
                                                 timesteps,
                                                 **kwargs)
+        self.non_linearity = non_linearity
+        self.embedding_dim = embedding_dim
+        self.num_lstm_units = num_units_lstm
+        self.num_layers = num_layers
 
         # Parameters
+        self.embedding = nn.Embedding(num_embeddings=num_pitches,
+                                      embedding_dim=self.embedding_dim)
+        self.lstm_e = nn.LSTM(input_size=self.embedding_dim,
+                              hidden_size=self.num_lstm_units,
+                              num_layers=self.num_layers,
+                              dropout=dropout_prob)
+
+        # TODO add repr_size
+        self.lstm_d = nn.LSTM(input_size=self.num_lstm_units + self.num_pitches,
+                              hidden_size=self.num_lstm_units,
+                              num_layers=self.num_layers,
+                              dropout=dropout_prob)
+
+        self.linear_out = nn.Linear(in_features=self.num_lstm_units,
+                                    out_features=num_pitches)
+
+    def forward(self, inputs, first_note):
+        # todo add hidden to inputs?
+        batch_size, seq_length = inputs[0].size()
+        assert seq_length == self.timesteps
+
+        hiddens = [self.hidden_init(batch_size)
+                   for _ in len(inputs)]
+        hidden_repr_1, hidden_repr_2 = self.hidden_repr(inputs, hiddens)
+
+        diff = hidden_repr_1 - hidden_repr_2
+        mean = (hidden_repr_1 + hidden_repr_2) / 2
+
+        hidden = self.hidden_init(batch_size,
+                                  )
+        weights, softmax = self.decode(hidden_repr=mean, hidden=hidden)
+        return weights, softmax, diff
+
+    def hidden_repr(self, inputs, hiddens):
+        # todo check dimensions
+        embeddings = [self.embedding(input) for input in inputs]
+        outputs_lstm = [self.lstm_e(input)[-1]
+                        for input, hidden in zip(embeddings, hiddens)]
+
+        if self.non_linearity:
+            NotImplementedError
+        else:
+            return outputs_lstm
+
+    def decode(self, hidden_repr, first_note, hidden):
+        """
+
+        :param hidden_repr:(batch_size, hidden_repr_size)
+        :type hidden_repr:
+        :return:
+        :rtype:
+        """
+        # transform input as seq
+        batch_size, hidden_repr_size = hidden_repr.size()
+        embedded_note = self.embedding(first_note)
+
+        input = torch.cat((hidden_repr,
+                           embedded_note),
+                          1)
+
+        input_as_seq = torch.cat((
+            input[None, :, :],
+            self.no_data_init(seq_length=self.timesteps,
+                              hidden_dim=hidden_repr + self.num_pitches,
+                              batch_size=batch_size
+                              ), 0
+        )
+        )
+
+        output_lstm = self.lstm_d(input_as_seq, hidden)
+        weights = [self.linear_out(output_lstm) for time_slice in output_lstm]
+        softmax = [F.softmax(time_slice) for time_slice in weights]
+        softmax = torch.cat(softmax)
+        softmax = softmax.view(self.timesteps, batch_size, self.num_features)
+
+        weights = torch.cat(weights)
+        weights = weights.view(self.timesteps, batch_size, self.num_features)
+        return weights, softmax
+
+    def hidden_init(self, batch_size, volatile=False) -> Variable:
+        hidden = (Variable(torch.rand(self.num_layers, batch_size,
+                                      self.num_lstm_units).cuda(),
+                           volatile=volatile),
+                  Variable(torch.rand(self.num_layers, batch_size,
+                                      self.num_lstm_units).cuda(),
+                           volatile=volatile))
+        return hidden
+
+    def no_data_init(self, seq_length, batch_size,
+                     hidden_dim=None,
+                     volatile=False) -> Variable:
+
+        no_data = Variable(torch.cat(
+            (torch.zeros(seq_length - 1, batch_size, hidden_dim),
+             torch.ones(seq_length - 1, batch_size, 1)), 2).cuda(),
+                           volatile=volatile)
+        return no_data
 
     def numpy_indexed2onehot_chunk(self, indexed_chorale,
                                    start_symbols,

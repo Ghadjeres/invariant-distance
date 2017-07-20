@@ -4,6 +4,7 @@ import os
 from deepPermutations.data_preprocessing import \
     initialize_transposition_dataset
 from deepPermutations.sequential_model import InvariantDistance
+from deepPermutations.model_manager import ModelManager
 
 
 def get_arguments():
@@ -124,10 +125,13 @@ if __name__ == '__main__':
         **distance_model_kwargs
     )
 
-    gen = invariant_distance.generator(batch_size=batch_size,
-                                       phase='all',
-                                       )
-    next(gen)
+    # gen = invariant_distance.generator(batch_size=batch_size,
+    #                                    phase='all',
+    #                                    )
+    # next(gen)
+
+    model_manager = ModelManager
+
     if train:
         invariant_distance.train(batch_size=256,
                                  nb_epochs=98,
