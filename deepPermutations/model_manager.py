@@ -1,15 +1,15 @@
 from itertools import islice
 
 import torch
-from deepPermutations.sequential_model import SequentialModel
 from torch import nn
 from torch.autograd import Variable
 from tqdm import tqdm
 
+from deepPermutations.sequential_model import SequentialModel
+
 
 def variable2float(v: Variable):
     return float(v.data.cpu().numpy())
-
 
 def plot_init(res_size):
     """
@@ -83,8 +83,6 @@ def accuracy(output_seq, targets_seq):
     seq_length = output_seq.size()[0]
     batch_size = output_seq.size()[1]
     sum = 0
-    # all many timesteps
-
     for t in range(seq_length):
         max_values, max_indices = output_seq[t].max(1)
         correct = max_indices[:, 0] == targets_seq[t]
@@ -94,12 +92,13 @@ def accuracy(output_seq, targets_seq):
 
 
 class ModelManager:
-    def __init__(self, model: SequentialModel, lr=1e-3):
+    def __init__(self, model: SequentialModel, lr=1e-3, lambda_reg=1e-5):
         self.model = model
         self.model.cuda()
         self.optimizer = torch.optim.Adam(
             self.model.parameters(),
             lr=lr)
+        self.lambda_reg = lambda_reg
 
     def load(self):
         self.model.load()
@@ -108,7 +107,7 @@ class ModelManager:
         self.model.save()
 
     def loss_and_acc_on_epoch(self, batches_per_epoch, generator,
-                              train=True, reg_norm='l1'):
+                              train=True, reg_norm=0):
 
         mean_mce_loss = 0
         mean_accuracy = 0
@@ -155,9 +154,9 @@ class ModelManager:
         loss = mce_loss
 
         # regularization
-        # TODO
         if reg_norm is not None:
-            loss += self.lambda_reg * grad_reg
+            reg = torch.norm(diff, p=reg_norm, dim=1).mean()
+            loss += self.lambda_reg * reg
 
         # backward pass and step
         if train:
@@ -170,7 +169,7 @@ class ModelManager:
         # compute mean loss and accuracy
         return (variable2float(mce_loss),
                 # variable2float(grad_reg),
-                0.,
+                variable2float(reg),
                 acc)
 
     def train_model(self,
@@ -180,14 +179,10 @@ class ModelManager:
                     plot=False,
                     save_every=10,
                     reg_norm=None):
-        effective_timestep = self.model.timesteps
         generator_train = self.model.generator(phase='train',
-                                               batch_size=batch_size,
-                                               effective_timestep=effective_timestep)
+                                               batch_size=batch_size)
         generator_val = self.model.generator(phase='test',
-                                             batch_size=batch_size,
-                                             effective_timestep=effective_timestep
-                                             )
+                                             batch_size=batch_size)
 
         res_size = 3
         if plot:
