@@ -1,6 +1,7 @@
 from itertools import islice
 
 import torch
+from deepPermutations.sequential_model import SequentialModel
 from torch import nn
 from torch.autograd import Variable
 from tqdm import tqdm
@@ -92,8 +93,8 @@ def accuracy(output_seq, targets_seq):
     return sum / seq_length
 
 
-class ModelManager():
-    def __init__(self, model, lr=1e-3):
+class ModelManager:
+    def __init__(self, model: SequentialModel, lr=1e-3):
         self.model = model
         self.model.cuda()
         self.optimizer = torch.optim.Adam(
@@ -179,10 +180,14 @@ class ModelManager():
                     plot=False,
                     save_every=10,
                     reg_norm=None):
+        effective_timestep = self.model.timesteps
         generator_train = self.model.generator(phase='train',
-                                               batch_size=batch_size)
+                                               batch_size=batch_size,
+                                               effective_timestep=effective_timestep)
         generator_val = self.model.generator(phase='test',
-                                             batch_size=batch_size)
+                                             batch_size=batch_size,
+                                             effective_timestep=effective_timestep
+                                             )
 
         res_size = 3
         if plot:

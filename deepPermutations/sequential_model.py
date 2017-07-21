@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from deepPermutations.data_preprocessing import SOP_INDEX
+from deepPermutations.data_utils import PACKAGE_DIR
 from deepPermutations.data_utils import START_SYMBOL, END_SYMBOL, \
     first_note_index
 from torch import nn
@@ -42,7 +43,11 @@ class SequentialModel(nn.Module):
         od = collections.OrderedDict(sorted(self.kwargs.items()))
         params_string = '_'.join(
             ['='.join(x) for x in zip(od.keys(), map(str, od.values()))])
-        self.filepath = f'models/{self.model_type}_{params_string}.h5'
+
+        self.filepath = os.path.join(PACKAGE_DIR,
+                                     f'models/{self.model_type}' \
+                                     f'_{params_string}.h5'
+                                     )
 
     def __str__(self):
         return self.filepath
@@ -150,6 +155,8 @@ class InvariantDistance(SequentialModel):
         # Parameters
         self.embedding = nn.Embedding(num_embeddings=num_pitches,
                                       embedding_dim=self.embedding_dim)
+        self.embedding_first_note = nn.Embedding(num_embeddings=num_pitches,
+                                                 embedding_dim=self.embedding_dim)
         self.lstm_e = nn.LSTM(input_size=self.embedding_dim,
                               hidden_size=self.num_lstm_units,
                               num_layers=self.num_layers,
@@ -211,7 +218,7 @@ class InvariantDistance(SequentialModel):
         """
         # transform input as seq
         batch_size, hidden_repr_size = hidden_repr.size()
-        embedded_note = self.embedding(first_note)
+        embedded_note = self.embedding_first_note(first_note)
 
         input = torch.cat((hidden_repr,
                            embedded_note),
@@ -327,26 +334,25 @@ class InvariantDistance(SequentialModel):
             transposition_indexes = np.random.choice(len(chorales),
                                                      replace=True, size=3)
 
-
             # there's padding of size timesteps before and after
-            chorale_length = len(chorales[0][0]) + 2 * self.timesteps
+            chorale_length = len(chorales[0][0][SOP_INDEX]) + 2 * self.timesteps
             time_index = np.random.randint(0,
                                            chorale_length - self.timesteps)
             for seq_index, seq_list in enumerate(sequences):
                 transposition_index = transposition_indexes[seq_index]
                 seq, _, offset = np.array(chorales[transposition_index])
                 # padding of size timesteps
-                onehot_chunk = self.numpy_indexed2chunk(seq,
-                                                        start_symbols,
-                                                        end_symbols,
-                                                        num_pitches,
-                                                        time_index)
-                seq_list.append(onehot_chunk)
+                chunk = self.numpy_indexed2chunk(seq,
+                                                 start_symbols,
+                                                 end_symbols,
+                                                 num_pitches,
+                                                 time_index)
+                seq_list.append(chunk)
 
             # find first note symbol of output seq (last sequence in sequences)
-            first_note_index_output_seq = first_note_index(seq[SOP_INDEX],
-                                                           time_index_start=time_index + self.timesteps - effective_timestep,
-                                                           time_index_end=time_index + self.timesteps,
+            first_note_index_output_seq = first_note_index(chunk,
+                                                           time_index_start=self.timesteps - effective_timestep,
+                                                           time_index_end=self.timesteps,
                                                            note2index=
                                                            note2indexes[
                                                                SOP_INDEX])

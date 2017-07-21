@@ -131,11 +131,13 @@ if __name__ == '__main__':
     # next(gen)
 
     model_manager = ModelManager(model=invariant_distance)
+    model_manager.load()
     if train:
         model_manager.train_model(batch_size=batch_size,
                                   num_epochs=num_epochs,
                                   batches_per_epoch=batches_per_epoch,
-                                  plot=True
+                                  plot=True,
+                                  save_every=2
                                   )
 
 

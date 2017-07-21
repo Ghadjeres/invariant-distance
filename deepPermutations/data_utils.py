@@ -6,7 +6,7 @@ Created on 7 mars 2016
 @author: Gaetan Hadjeres
 """
 import pickle
-
+import os
 import numpy as np
 from music21 import corpus, converter, stream, note, duration, interval
 from music21.analysis.floatingKey import FloatingKeyException
@@ -22,6 +22,7 @@ BASS = 1
 
 OCTAVE = 12
 
+PACKAGE_DIR = os.path.realpath(os.path.dirname(__file__))
 BACH_DATASET = 'datasets/raw_dataset/bach_dataset.pickle'
 
 voice_ids_default = list(range(NUM_VOICES))  # soprano, alto, tenor, bass
@@ -409,118 +410,6 @@ def first_note_index(indexed_seq, time_index_start, time_index_end,
             return indexed_seq[t]
     return note2index[SLUR_SYMBOL]
 
-
-def generator_from_raw_dataset(batch_size, timesteps, voice_index,
-                               phase='train', percentage_train=0.8,
-                               pickled_dataset=BACH_DATASET,
-                               transpose=True):
-    """
-     Returns a generator of
-            (left_features,
-            central_features,
-            right_features,
-            beats,
-            metas,
-            labels,
-            fermatas) tuples
-
-            where fermatas = (fermatas_left, central_fermatas, fermatas_right)
-    """
-
-    X, X_metadatas, voice_ids, index2notes, note2indexes, metadatas = pickle.load(
-        open(pickled_dataset, 'rb'))
-    num_pitches = list(map(lambda x: len(x), index2notes))
-    num_voices = len(voice_ids)
-    # Set chorale_indices
-    if phase == 'train':
-        chorale_indices = np.arange(int(len(X) * percentage_train))
-    if phase == 'test':
-        chorale_indices = np.arange(int(len(X) * percentage_train), len(X))
-    if phase == 'all':
-        chorale_indices = np.arange(int(len(X)))
-
-    left_features = []
-    right_features = []
-    central_features = []
-    left_metas = []
-    right_metas = []
-    metas = []
-
-    labels = []
-    batch = 0
-
-    while True:
-        chorale_index = np.random.choice(chorale_indices)
-        extended_chorale = np.transpose(X[chorale_index])
-        chorale_metas = X_metadatas[chorale_index]
-        padding_dimensions = (timesteps,) + extended_chorale.shape[1:]
-
-        start_symbols = np.array(list(
-            map(lambda note2index: note2index[START_SYMBOL], note2indexes)))
-        end_symbols = np.array(
-            list(map(lambda note2index: note2index[END_SYMBOL], note2indexes)))
-
-        extended_chorale = np.concatenate(
-            (np.full(padding_dimensions, start_symbols),
-             extended_chorale,
-             np.full(padding_dimensions, end_symbols)),
-            axis=0)
-        extended_chorale_metas = [np.concatenate((np.zeros((timesteps,)),
-                                                  chorale_meta,
-                                                  np.zeros((timesteps,))),
-                                                 axis=0)
-                                  for chorale_meta in chorale_metas]
-        chorale_length = len(extended_chorale)
-
-        time_index = np.random.randint(timesteps, chorale_length - timesteps)
-
-        features = all_features(chorale=extended_chorale,
-                                voice_index=voice_index, time_index=time_index,
-                                timesteps=timesteps, num_pitches=num_pitches,
-                                num_voices=num_voices)
-        left_meta, meta, right_meta = all_metadatas(
-            chorale_metadatas=extended_chorale_metas, metadatas=metadatas,
-            time_index=time_index, timesteps=timesteps)
-
-        (left_feature, central_feature, right_feature,
-         label
-         ) = features
-
-        left_features.append(left_feature)
-        right_features.append(right_feature)
-        central_features.append(central_feature)
-
-        left_metas.append(left_meta)
-        right_metas.append(right_meta)
-        metas.append(meta)
-        labels.append(label)
-
-        batch += 1
-
-        # if there is a full batch
-        if batch == batch_size:
-            next_element = (
-                (np.array(left_features, dtype=np.float32),
-                 np.array(central_features, dtype=np.float32),
-                 np.array(right_features, dtype=np.float32)
-                 ),
-                (np.array(left_metas, dtype=np.float32),
-                 np.array(metas, dtype=np.float32),
-                 np.array(right_metas, dtype=np.float32)
-                 ),
-                np.array(labels, dtype=np.float32))
-
-            yield next_element
-
-            batch = 0
-
-            left_features = []
-            central_features = []
-            right_features = []
-            left_metas = []
-            right_metas = []
-            metas = []
-            labels = []
 
 
 def seq_to_stream(seq):
