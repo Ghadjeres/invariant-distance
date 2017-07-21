@@ -135,9 +135,9 @@ if __name__ == '__main__':
 
     model_manager = ModelManager(model=invariant_distance,
                                  lr=1e-3,
-                                 lambda_reg=1.e-3
+                                 lambda_reg=1.e-5
                                  )
-    # model_manager.load()
+    model_manager.load()
     if train:
         model_manager.train_model(batch_size=batch_size,
                                   num_epochs=num_epochs,
