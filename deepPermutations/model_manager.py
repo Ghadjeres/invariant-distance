@@ -157,6 +157,8 @@ class ModelManager:
         if reg_norm is not None:
             reg = torch.norm(diff, p=reg_norm, dim=1).mean()
             loss += self.lambda_reg * reg
+        else:
+            reg = Variable(torch.zeros(1), volatile=True)
 
         # backward pass and step
         if train:
@@ -168,7 +170,6 @@ class ModelManager:
 
         # compute mean loss and accuracy
         return (variable2float(mce_loss),
-                # variable2float(grad_reg),
                 variable2float(reg),
                 acc)
 

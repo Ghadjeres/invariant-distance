@@ -1,12 +1,10 @@
 import argparse
 import os
 
-import pickle
-
 from deepPermutations.data_preprocessing import \
     initialize_transposition_dataset
-from deepPermutations.sequential_model import InvariantDistance
 from deepPermutations.model_manager import ModelManager
+from deepPermutations.sequential_model import InvariantDistanceRelu
 
 
 def get_arguments():
@@ -26,13 +24,13 @@ def get_arguments():
                         help=f'number of validation batch samples '
                              f'(default: %(default)s)',
                         type=int, default=2560)
-    parser.add_argument('-u', '--num_units_lstm', nargs='+',
+    parser.add_argument('-u', '--num_units_lstm',
                         help=f'number of lstm units (default: %(default)s)',
-                        type=int, default=[200, 200])
+                        type=int, default=512)
     parser.add_argument('-d', '--num_dense',
                         help=f'size of non recurrent hidden layers '
                              f'(default: %(default)s)',
-                        type=int, default=200)
+                        type=int, default=256)
     parser.add_argument('-n', '--name',
                         help='model name (default: %(default)s)',
                         choices=['relu', 'norelu'],
@@ -116,13 +114,21 @@ if __name__ == '__main__':
         # reg=None,
         dropout_prob=0.3,
         num_layers=2,
-        num_units_lstm=512,
+        num_units_lstm=num_units_lstm,
     )
 
-    invariant_distance = InvariantDistance(
+    # invariant_distance = InvariantDistance(
+    #     dataset_name=pickle_filepath,
+    #     timesteps=timesteps,
+    #     num_pitches=55,
+    #     **distance_model_kwargs
+    # )
+
+    invariant_distance = InvariantDistanceRelu(
         dataset_name=pickle_filepath,
         timesteps=timesteps,
         num_pitches=55,
+        mlp_hidden_size=num_dense,
         **distance_model_kwargs
     )
 
@@ -135,28 +141,28 @@ if __name__ == '__main__':
                                  lr=1e-3,
                                  lambda_reg=1.e-5
                                  )
-    model_manager.load()
+    # model_manager.load()
     if train:
         model_manager.train_model(batch_size=batch_size,
                                   num_epochs=num_epochs,
                                   batches_per_epoch=batches_per_epoch,
                                   plot=True,
                                   save_every=2,
-                                  reg_norm=2
+                                  reg_norm=None
                                   )
 
     invariant_distance.find_nearests(
         target_seq=None,
         show_results=True,
         num_elements=20000)
-    # invariant_distance_model.show_preds(effective_timestep=32)
+    # todo show pred
     # invariant_distance_model.test_transpose_out_of_bounds(
     #     effective_timestep=32)
-    # invariant_distance_model.show_distance_matrix(chorale_index=241,
-    #                                               time_index=32,
-    #                                               show_plotly=True)
+    invariant_distance.show_mean_distance_matrix(chorale_index=241,
+                                            time_index=32,
+                                            show_plotly=True)
     # invariant_distance_model.show_mean_distance_matrix(chorale_index=0,
     #                                                    show_plotly=True)
-    # invariant_distance_model.compute_stats(chorale_index=0, num_elements=1000)
+    invariant_distance.compute_stats(chorale_index=0, num_elements=1000)
     # invariant_distance_model.show_all_absolute_preds(effective_timestep=32)
     exit()

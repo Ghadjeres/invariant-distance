@@ -9,8 +9,10 @@ import os
 import pickle
 
 import numpy as np
+import torch
 from music21 import corpus, converter, stream, note, duration, interval
 from music21.analysis.floatingKey import FloatingKeyException
+from torch.autograd import Variable
 from tqdm import tqdm
 
 NUM_VOICES = 4
@@ -42,6 +44,12 @@ def variable2numpy(v, cuda=True):
         return v.data.cpu().numpy()
     else:
         return v.data.numpy()
+
+def numpy2variable(a, cuda=True, volatile=False):
+    t = torch.from_numpy(a)
+    if cuda:
+        t = t.cuda()
+    return Variable(t, volatile=volatile)
 
 def to_pitch_class(note_str):
     s = ''

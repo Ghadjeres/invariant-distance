@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 from deepPermutations.data_preprocessing import SOP_INDEX, indexed_seq_to_score
 from deepPermutations.data_utils import PACKAGE_DIR, \
-    chorale_onehot_to_indexed_chorale, variable2numpy
+    variable2numpy, SEQ, numpy2variable
 from deepPermutations.data_utils import START_SYMBOL, END_SYMBOL, \
     first_note_index
 from deepPermutations.permutation_distance import spearman_rho
@@ -136,12 +136,13 @@ class SequentialModel(nn.Module):
         print(max_dist)
         if show_results:
             # concat all results
-            nearest_chorale = np.concatenate([target_chorale[SOP_INDEX].numpy()] +
-                                             [np.array(
-                                                 nearest_chorales[SOP_INDEX])
-                                                 for nearest_chorales in
-                                                 intermediate_results],
-                                             axis=0)
+            nearest_chorale = np.concatenate(
+                [target_chorale[SOP_INDEX].numpy()] +
+                [np.array(
+                    nearest_chorales[SOP_INDEX])
+                    for nearest_chorales in
+                    intermediate_results],
+                axis=0)
 
             _, _, index2notes, note2indexes, _ = pickle.load(open(
                 self.dataset_filepath, 'rb'))
@@ -151,6 +152,57 @@ class SequentialModel(nn.Module):
             score_nearest.show()
         return min_chorale, intermediate_results
 
+    def show_mean_distance_matrix(self, chorale_index=0, timesteps=32,
+                                  show_plotly=False):
+
+        (X,
+         voice_ids,
+         index2notes,
+         note2indexes,
+         metadatas) = pickle.load(open(self.dataset_filepath, 'rb'))
+
+        # input:
+        chorale_transpositions = X[chorale_index]
+        sequence_length = len(chorale_transpositions[0][SEQ][SOP_INDEX])
+        num_chunks = sequence_length - timesteps
+
+        mat = np.zeros((num_chunks, len(chorale_transpositions),
+                        len(chorale_transpositions)))
+
+        for time_index in tqdm(range(num_chunks)):
+            for index_transposition_1, chorale_1 in enumerate(
+                    chorale_transpositions):
+
+                hidden_repr_1 = self.hidden_repr(
+                    numpy2variable(chorale_1[SEQ][:, time_index:
+                    time_index +
+                    timesteps])
+                )[0]
+                for index_transposition_2, chorale_2 in enumerate(
+                        chorale_transpositions):
+
+                    hidden_repr_2 = self.hidden_repr(
+                        numpy2variable(chorale_2[SEQ][:, time_index:
+                        time_index +
+                        timesteps])
+                    )[0]
+
+                    mat[time_index,
+                        index_transposition_1,
+                        index_transposition_2] = spearman_rho(hidden_repr_1,
+                                                              hidden_repr_2)
+
+        mean = np.mean(mat, axis=0)
+        std = np.std(mat, axis=0)
+        if show_plotly:
+            import seaborn as sns
+            from matplotlib import pyplot as plt
+            fig, (ax1, ax2) = plt.subplots(ncols=2, sharey=True)
+            sns.heatmap(mean, ax=ax1)
+            sns.heatmap(std, ax=ax2)
+        else:
+            print(mean)
+            print(std)
 
 class InvariantDistance(SequentialModel):
     def __init__(self,
@@ -162,8 +214,8 @@ class InvariantDistance(SequentialModel):
                  num_layers=1,
                  embedding_dim=16,
                  non_linearity=None,
+                 model_type='invariant_distance',
                  **kwargs):
-        model_type = 'invariant_distance'
         super(InvariantDistance, self).__init__(model_type,
                                                 dataset_name,
                                                 num_pitches,
@@ -212,7 +264,7 @@ class InvariantDistance(SequentialModel):
     def hidden_repr(self, input):
         """
 
-        :param input:
+        :param input:(batch_size, seq_length)
         :type input:
         :param hidden:
         :type hidden:
@@ -307,7 +359,7 @@ class InvariantDistance(SequentialModel):
 
         return input_seq[time_index: time_index + self.timesteps]
 
-    def generator(self, batch_size, phase, percentage_train=0.8):
+    def generator(self, batch_size, phase, percentage_train=0.8, **kwargs):
         """
 
         :param batch_size:
@@ -319,7 +371,6 @@ class InvariantDistance(SequentialModel):
 
         X, voice_ids, index2notes, note2indexes, metadatas = pickle.load(
             open(self.dataset_filepath, 'rb'))
-        num_pitches = list(map(lambda x: len(x), index2notes))[SOP_INDEX]
 
         start_symbols = np.array(list(
             map(lambda note2index: note2index[START_SYMBOL],
@@ -346,13 +397,10 @@ class InvariantDistance(SequentialModel):
         while True:
             chorale_index = np.random.choice(chorale_indices)
             chorales = X[chorale_index]
-            if len(chorales) == 1:
+            if len(chorales) < 3:
                 continue
-            # if not effective_timestep:
-            #     effective_timestep = np.random.randint(min(8, self.timesteps),
-            #                                            self.timesteps + 1)
             transposition_indexes = np.random.choice(len(chorales),
-                                                     replace=True, size=3)
+                                                     replace=False, size=3)
 
             # there's padding of size timesteps before and after
             chorale_length = len(
@@ -397,3 +445,66 @@ class InvariantDistance(SequentialModel):
                 batch = 0
                 first_notes = []
                 sequences = [[] for _ in range(3)]
+
+
+class InvariantDistanceRelu(InvariantDistance):
+    def __init__(self,
+                 dataset_name,
+                 timesteps,
+                 num_units_lstm=256,
+                 num_pitches=None,
+                 dropout_prob=0.2,
+                 num_layers=1,
+                 embedding_dim=16,
+                 non_linearity=None,
+                 mlp_hidden_size=None,
+                 model_type='invariant_distance_relu',
+                 **kwargs):
+        super(InvariantDistanceRelu, self).__init__(model_type=model_type,
+                                                    dataset_name=dataset_name,
+                                                    timesteps=timesteps,
+                                                    num_units_lstm=num_units_lstm,
+                                                    num_pitches=num_pitches,
+                                                    dropout_prob=dropout_prob,
+                                                    num_layers=num_layers,
+                                                    embedding_dim=embedding_dim,
+                                                    non_linearity=non_linearity,
+                                                    **kwargs
+                                                    )
+        self.linear_1_mlp = nn.Linear(in_features=self.num_lstm_units,
+                                      out_features=mlp_hidden_size)
+        self.linear_2_mlp = nn.Linear(in_features=mlp_hidden_size,
+                                      out_features=self.num_lstm_units)
+
+    def hidden_repr(self, input):
+        hidden_no_relu = super(InvariantDistanceRelu, self).hidden_repr(
+            input=input)
+        # return self.linear_1_mlp(hidden_no_relu)
+        return hidden_no_relu
+        # return F.elu(self.linear_1_mlp(hidden_no_relu))
+
+    def forward(self, inputs, first_note):
+        # todo add hidden to inputs?
+        batch_size, seq_length = inputs[0].size()
+        assert seq_length == self.timesteps
+
+        hidden_reprs_relu = [self.hidden_repr(input)
+                             for input in inputs]
+
+        hidden_repr_relu_1, hidden_repr_relu_2 = hidden_reprs_relu
+        diff_relu = hidden_repr_relu_1 - hidden_repr_relu_2
+
+        # hidden_reprs = [self.linear_2_mlp(hidden_repr_relu)
+        #                 for hidden_repr_relu in hidden_reprs_relu]
+        hidden_reprs = hidden_reprs_relu
+
+        hidden_repr_1, hidden_repr_2 = hidden_reprs
+        # diff = hidden_repr_1 - hidden_repr_2
+        mean = (hidden_repr_1 + hidden_repr_2) / 2
+
+        weights, softmax = self.decode(hidden_repr=mean,
+                                       first_note=first_note,
+                                       sequence_length=seq_length)
+        return weights, softmax, diff_relu
+
+# TODO specific hidden_repr size
