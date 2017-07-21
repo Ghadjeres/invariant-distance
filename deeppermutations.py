@@ -110,9 +110,9 @@ if __name__ == '__main__':
 
     # INVARIANT DISTANCE
     distance_model_kwargs = dict(
-        reg='l2',
+        reg=None,
         # reg=None,
-        dropout_prob=0.3,
+        dropout_prob=0.001,
         num_layers=2,
         num_units_lstm=num_units_lstm,
     )
@@ -138,7 +138,7 @@ if __name__ == '__main__':
     # next(gen)
 
     model_manager = ModelManager(model=invariant_distance,
-                                 lr=1e-3,
+                                 lr=1e-4,
                                  lambda_reg=1.e-2
                                  )
     model_manager.load()
@@ -148,7 +148,7 @@ if __name__ == '__main__':
                                   batches_per_epoch=batches_per_epoch,
                                   plot=True,
                                   save_every=2,
-                                  reg_norm='l1'
+                                  reg_norm=None
                                   )
 
     # invariant_distance.find_nearests(

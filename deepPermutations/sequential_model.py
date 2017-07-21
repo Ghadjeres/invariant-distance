@@ -82,6 +82,32 @@ class SequentialModel(nn.Module):
                            volatile=volatile)
         return no_data
 
+    def numpy_indexed2chunk(self, indexed_chorale,
+                            start_symbols,
+                            end_symbols,
+                            time_index):
+        """
+
+        :param indexed_chorale:
+        :type indexed_chorale:
+        :param start_symbols: used for padding
+        :type start_symbols:
+        :param end_symbols:
+        :type end_symbols:
+        :return: random onehot chunk of size (timesteps, num_pitches)
+        :rtype:
+        """
+        # pad with start and end symbols
+        padding_dimensions = (self.timesteps,)
+
+        input_seq = np.concatenate(
+            (np.full(padding_dimensions, start_symbols),
+             indexed_chorale[SOP_INDEX],
+             np.full(padding_dimensions, end_symbols)),
+            axis=0).astype(np.long)
+
+        return input_seq[time_index: time_index + self.timesteps]
+
     def save(self):
         torch.save(self.state_dict(), self.filepath)
 
@@ -230,7 +256,7 @@ class SequentialModel(nn.Module):
 
         # input:
         chorale_transpositions = X[chorale_index]
-        sequence_length = len(chorale_transpositions[0][SEQ][SOP_INDEX])
+        # sequence_length = len(chorale_transpositions[0][SEQ][SOP_INDEX])
         generator_unitary = self.generator_unitary
 
         distance_diff = []
@@ -289,6 +315,213 @@ class SequentialModel(nn.Module):
         for a in hist_data:
             sns.distplot(a, ax=ax, kde=True)
         sns.plt.show()
+
+# TODO  clean refactor
+class Distance(SequentialModel):
+    def __init__(self,
+                 dataset_name,
+                 timesteps,
+                 num_units_lstm=256,
+                 num_pitches=None,
+                 dropout_prob=0.2,
+                 num_layers=1,
+                 embedding_dim=16,
+                 non_linearity=None,
+                 model_type='distance',
+                 **kwargs):
+        super(Distance, self).__init__(model_type,
+                                       dataset_name,
+                                       num_pitches,
+                                       timesteps,
+                                       **kwargs)
+        self.non_linearity = non_linearity
+        self.embedding_dim = embedding_dim
+        self.num_lstm_units = num_units_lstm
+        self.num_layers = num_layers
+
+        # Parameters
+        self.embedding = nn.Embedding(num_embeddings=num_pitches,
+                                      embedding_dim=self.embedding_dim)
+        self.lstm_e = nn.LSTM(input_size=self.embedding_dim,
+                              hidden_size=self.num_lstm_units,
+                              num_layers=self.num_layers,
+                              dropout=dropout_prob)
+
+        # TODO add repr_size
+        self.lstm_d = nn.LSTM(
+            input_size=self.num_lstm_units + self.embedding_dim + 1,
+            hidden_size=self.num_lstm_units,
+            num_layers=self.num_layers,
+            dropout=dropout_prob)
+
+        self.linear_out = nn.Linear(in_features=self.num_lstm_units,
+                                    out_features=num_pitches)
+
+    def forward(self, input, first_note):
+        # todo add hidden to inputs?
+        batch_size, seq_length = input[0].size()
+        assert seq_length == self.timesteps
+
+        hidden_repr = self.hidden_repr(input)
+        weights, softmax = self.decode(hidden_repr=hidden_repr,
+                                       first_note=first_note,
+                                       sequence_length=seq_length)
+        return weights, softmax, 0
+
+    def hidden_repr(self, input):
+        """
+
+        :param input:(batch_size, seq_length)
+        :type input:
+        :param hidden:
+        :type hidden:
+        :return: (batch_size, hidden_repr_dim)
+        :rtype:
+        """
+        # todo check dimensions
+        batch_size, _ = input.size()
+        embedding = self.embedding(input)
+        embedding_time_major = torch.transpose(
+            embedding, 0, 1)
+
+        hidden = self.hidden_init(batch_size, self.num_lstm_units)
+
+        outputs_lstm, _ = self.lstm_e(embedding_time_major, hidden)
+        last_output = outputs_lstm[-1]
+
+        if self.non_linearity:
+            NotImplementedError
+        else:
+            return last_output
+
+    def decode(self, hidden_repr, first_note, sequence_length):
+        """
+
+        :param hidden_repr:(batch_size, hidden_repr_size)
+        :type hidden_repr:
+        :return:(timestep, batch_size, num_pitches)
+        :rtype:
+        """
+        # transform input as seq
+        batch_size, hidden_repr_size = hidden_repr.size()
+        embedded_note = self.embedding(first_note)
+
+        input = torch.cat((hidden_repr,
+                           embedded_note),
+                          1)
+
+        no_data = self.no_data_init(seq_length=sequence_length,
+                                    batch_size=batch_size,
+                                    input_size=input.size()[1])
+
+        hidden = self.hidden_init(batch_size,
+                                  self.num_lstm_units
+                                  )
+
+        input_extended = torch.cat(
+            (input[None, :, :], Variable(torch.zeros(1, batch_size, 1).cuda(
+            ))), 2)
+        input_as_seq = torch.cat(
+            [input_extended, no_data], 0)
+
+        output_lstm, _ = self.lstm_d(input_as_seq, hidden)
+        weights = [self.linear_out(time_slice) for time_slice in output_lstm]
+        softmax = [F.softmax(time_slice) for time_slice in weights]
+        softmax = torch.cat(softmax)
+        softmax = softmax.view(self.timesteps, batch_size, self.num_pitches)
+
+        weights = torch.cat(weights)
+        weights = weights.view(self.timesteps, batch_size, self.num_pitches)
+        return weights, softmax
+
+    # TODO cannot change generator output because we need a method
+    # output_gen -> forward variable input
+    def generator(self, batch_size, phase, percentage_train=0.8, **kwargs):
+        """
+
+        :param batch_size:
+        :param phase:
+        :param percentage_train:
+        :return:
+        """
+        # TODO effective timesteps?
+
+        X, voice_ids, index2notes, note2indexes, metadatas = pickle.load(
+            open(self.dataset_filepath, 'rb'))
+
+        start_symbols = np.array(list(
+            map(lambda note2index: note2index[START_SYMBOL],
+                note2indexes)))[SOP_INDEX]
+        end_symbols = np.array(list(
+            map(lambda note2index: note2index[END_SYMBOL], note2indexes)))[
+            SOP_INDEX]
+
+        # Set chorale_indices
+        if phase == 'train':
+            chorale_indices = np.arange(int(len(X) * percentage_train))
+        elif phase == 'test':
+            chorale_indices = np.arange(int(len(X) * percentage_train), len(X))
+        elif phase == 'all':
+            chorale_indices = np.arange(int(len(X)))
+        else:
+            NotImplementedError
+
+        first_notes = []
+        sequences = [[] for _ in range(3)]
+
+        batch = 0
+
+        while True:
+            chorale_index = np.random.choice(chorale_indices)
+            chorales = X[chorale_index]
+            if len(chorales) < 3:
+                continue
+            transposition_indexes = np.random.choice(len(chorales),
+                                                     replace=False, size=3)
+
+            # there's padding of size timesteps before and after
+            chorale_length = len(
+                chorales[0][0][SOP_INDEX]) + 2 * self.timesteps
+            time_index = np.random.randint(0,
+                                           chorale_length - self.timesteps)
+            for seq_index, seq_list in enumerate(sequences):
+                transposition_index = transposition_indexes[seq_index]
+                indexed_chorale, _, offset = np.array(
+                    chorales[transposition_index])
+                # padding of size timesteps
+                chunk = self.numpy_indexed2chunk(indexed_chorale,
+                                                 start_symbols,
+                                                 end_symbols,
+                                                 time_index)
+                seq_list.append(chunk)
+
+            # find first note symbol of output seq (last sequence in sequences)
+            first_note_index_output_seq = \
+                first_note_index(chunk,
+                                 time_index_start=0,
+                                 time_index_end=self.timesteps,
+                                 note2index=note2indexes[SOP_INDEX])
+            first_notes.append(first_note_index_output_seq)
+
+            batch += 1
+            # if there is a full batch
+            if batch == batch_size:
+                torch_sequences = [torch.from_numpy(np.array(chunk))
+                                   for chunk in sequences]
+                torch_first_notes = torch.from_numpy(np.array(first_notes,
+                                                              dtype=np.long))
+
+                # input_1, input_2, first_note, output
+                next_element = (torch_sequences[0],
+                                torch_sequences[1],
+                                torch_first_notes,
+                                torch_sequences[2],
+                                )
+                yield next_element
+
+                batch = 0
+                first_notes = []
+                sequences = [[] for _ in range(3)]
 
 
 class InvariantDistance(SequentialModel):
@@ -420,32 +653,6 @@ class InvariantDistance(SequentialModel):
         weights = weights.view(self.timesteps, batch_size, self.num_pitches)
         return weights, softmax
 
-    def numpy_indexed2chunk(self, indexed_chorale,
-                            start_symbols,
-                            end_symbols,
-                            time_index):
-        """
-
-        :param indexed_chorale:
-        :type indexed_chorale:
-        :param start_symbols: used for padding
-        :type start_symbols:
-        :param end_symbols:
-        :type end_symbols:
-        :return: random onehot chunk of size (timesteps, num_pitches)
-        :rtype:
-        """
-        # pad with start and end symbols
-        padding_dimensions = (self.timesteps,)
-
-        input_seq = np.concatenate(
-            (np.full(padding_dimensions, start_symbols),
-             indexed_chorale[SOP_INDEX],
-             np.full(padding_dimensions, end_symbols)),
-            axis=0).astype(np.long)
-
-        return input_seq[time_index: time_index + self.timesteps]
-
     def generator(self, batch_size, phase, percentage_train=0.8, **kwargs):
         """
 
@@ -562,12 +769,14 @@ class InvariantDistanceRelu(InvariantDistance):
                                       out_features=mlp_hidden_size)
         self.linear_2_mlp = nn.Linear(in_features=mlp_hidden_size,
                                       out_features=self.num_lstm_units)
+        self.prelu = nn.PReLU()
 
     def hidden_repr(self, input):
         hidden_no_relu = super(InvariantDistanceRelu, self).hidden_repr(
             input=input)
-        # return self.linear_1_mlp(hidden_no_relu)
-        return hidden_no_relu
+        # return self.prelu(self.linear_1_mlp(hidden_no_relu))
+        return self.prelu(hidden_no_relu)
+        # return hidden_no_relu
         # return F.elu(self.linear_1_mlp(hidden_no_relu))
 
     def forward(self, inputs, first_note):
