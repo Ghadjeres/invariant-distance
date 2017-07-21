@@ -139,30 +139,29 @@ if __name__ == '__main__':
 
     model_manager = ModelManager(model=invariant_distance,
                                  lr=1e-3,
-                                 lambda_reg=1.e-5
+                                 lambda_reg=1.e-2
                                  )
-    # model_manager.load()
+    model_manager.load()
     if train:
         model_manager.train_model(batch_size=batch_size,
                                   num_epochs=num_epochs,
                                   batches_per_epoch=batches_per_epoch,
                                   plot=True,
                                   save_every=2,
-                                  reg_norm=None
+                                  reg_norm='l1'
                                   )
 
-    invariant_distance.find_nearests(
-        target_seq=None,
-        show_results=True,
-        num_elements=20000)
+    # invariant_distance.find_nearests(
+    #     target_seq=None,
+    #     show_results=True,
+    #     num_elements=5000)
     # todo show pred
     # invariant_distance_model.test_transpose_out_of_bounds(
     #     effective_timestep=32)
+    invariant_distance.compute_stats(chorale_index=0, num_elements=2000)
     invariant_distance.show_mean_distance_matrix(chorale_index=241,
-                                            time_index=32,
-                                            show_plotly=True)
+                                                 show_plot=True)
     # invariant_distance_model.show_mean_distance_matrix(chorale_index=0,
     #                                                    show_plotly=True)
-    invariant_distance.compute_stats(chorale_index=0, num_elements=1000)
     # invariant_distance_model.show_all_absolute_preds(effective_timestep=32)
     exit()

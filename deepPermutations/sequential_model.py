@@ -95,8 +95,8 @@ class SequentialModel(nn.Module):
         :type target_seq:
 
         """
+        self.eval()
         max_dist = 100000
-
         generator_unitary = self.generator(batch_size=1,
                                            phase='all')
 
@@ -152,9 +152,9 @@ class SequentialModel(nn.Module):
             score_nearest.show()
         return min_chorale, intermediate_results
 
-    def show_mean_distance_matrix(self, chorale_index=0, timesteps=32,
-                                  show_plotly=False):
-
+    def show_mean_distance_matrix(self, chorale_index=0,
+                                  show_plot=False):
+        self.eval()
         (X,
          voice_ids,
          index2notes,
@@ -164,11 +164,12 @@ class SequentialModel(nn.Module):
         # input:
         chorale_transpositions = X[chorale_index]
         sequence_length = len(chorale_transpositions[0][SEQ][SOP_INDEX])
-        num_chunks = sequence_length - timesteps
+        num_chunks = sequence_length - self.timesteps
 
         mat = np.zeros((num_chunks, len(chorale_transpositions),
                         len(chorale_transpositions)))
 
+        # todo remove
         for time_index in tqdm(range(num_chunks)):
             for index_transposition_1, chorale_1 in enumerate(
                     chorale_transpositions):
@@ -176,16 +177,24 @@ class SequentialModel(nn.Module):
                 hidden_repr_1 = self.hidden_repr(
                     numpy2variable(chorale_1[SEQ][:, time_index:
                     time_index +
-                    timesteps])
+                    self.timesteps],
+                                   dtype=np.long,
+                                   volatile=True)
                 )[0]
+
+                hidden_repr_1 = variable2numpy(hidden_repr_1)
+
                 for index_transposition_2, chorale_2 in enumerate(
                         chorale_transpositions):
-
                     hidden_repr_2 = self.hidden_repr(
                         numpy2variable(chorale_2[SEQ][:, time_index:
                         time_index +
-                        timesteps])
+                        self.timesteps],
+                                       dtype=np.long,
+                                       volatile=True
+                                       )
                     )[0]
+                    hidden_repr_2 = variable2numpy(hidden_repr_2)
 
                     mat[time_index,
                         index_transposition_1,
@@ -194,15 +203,93 @@ class SequentialModel(nn.Module):
 
         mean = np.mean(mat, axis=0)
         std = np.std(mat, axis=0)
-        if show_plotly:
+        if show_plot:
             import seaborn as sns
             from matplotlib import pyplot as plt
+            # plt.ion()
             fig, (ax1, ax2) = plt.subplots(ncols=2, sharey=True)
             sns.heatmap(mean, ax=ax1)
             sns.heatmap(std, ax=ax2)
+            sns.plt.show()
         else:
             print(mean)
             print(std)
+
+    def compute_stats(self, chorale_index=0, num_elements=1000, timesteps=32):
+        """
+
+        :param num_elements:
+        :return: features produced by generator that achieve minimum distance
+        """
+        self.eval()
+        (X,
+         voice_ids,
+         index2notes,
+         note2indexes,
+         metadatas) = pickle.load(open(self.dataset_filepath, 'rb'))
+
+        # input:
+        chorale_transpositions = X[chorale_index]
+        sequence_length = len(chorale_transpositions[0][SEQ][SOP_INDEX])
+        generator_unitary = self.generator_unitary
+
+        distance_diff = []
+        distance_same = []
+
+        for _ in tqdm(range(num_elements)):
+            # different sequences:
+            hidden_repr_1 = self.hidden_repr(
+                Variable(next(generator_unitary)[0].cuda(),
+                         volatile=True)
+            )[0]
+            hidden_repr_2 = self.hidden_repr(
+                Variable(next(generator_unitary)[0].cuda(),
+                         volatile=True)
+            )[0]
+
+            hidden_repr_1 = variable2numpy(hidden_repr_1)
+            hidden_repr_2 = variable2numpy(hidden_repr_2)
+
+            distance_diff.append(spearman_rho(hidden_repr_1, hidden_repr_2))
+
+            # same sequence up to transposition
+            chorale_transpositions = np.random.choice(X)
+
+            chorale_length = len(chorale_transpositions[0][SEQ][SOP_INDEX])
+            time_index = np.random.choice(chorale_length - timesteps)
+            transposition_index_1, transposition_index_2 = np.random.choice(
+                len(chorale_transpositions), size=2)
+            transposition_1 = chorale_transpositions[transposition_index_1]
+            transposition_2 = chorale_transpositions[transposition_index_2]
+
+            hidden_repr_1 = self.hidden_repr(
+                numpy2variable(transposition_1[SEQ][:, time_index: time_index +
+                                                                   self.timesteps],
+                               dtype=np.long,
+                               volatile=True)
+            )[0]
+            hidden_repr_2 = self.hidden_repr(
+                numpy2variable(transposition_2[SEQ][:, time_index: time_index +
+                                                                   self.timesteps],
+                               dtype=np.long,
+                               volatile=True)
+            )[0]
+
+            hidden_repr_1 = variable2numpy(hidden_repr_1)
+            hidden_repr_2 = variable2numpy(hidden_repr_2)
+
+            distance_same.append(spearman_rho(hidden_repr_1, hidden_repr_2))
+
+        hist_data = [distance_diff, distance_same]
+
+        import seaborn as sns
+        from matplotlib import pyplot as plt
+        sns.set()
+        fig, ax = plt.subplots()
+        for a in hist_data:
+            sns.distplot(a, ax=ax, kde=True)
+        sns.plt.show()
+
 
 class InvariantDistance(SequentialModel):
     def __init__(self,

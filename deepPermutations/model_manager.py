@@ -155,7 +155,12 @@ class ModelManager:
 
         # regularization
         if reg_norm is not None:
-            reg = torch.norm(diff, p=reg_norm, dim=1).mean()
+            if reg_norm == 'l1':
+                reg = torch.abs(diff).sum(1).mean()
+            elif reg_norm == 'l2':
+                reg = torch.norm(diff, p=2, dim=1).mean()
+            else:
+                NotImplementedError
             loss += self.lambda_reg * reg
         else:
             reg = Variable(torch.zeros(1), volatile=True)

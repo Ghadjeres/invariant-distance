@@ -45,7 +45,10 @@ def variable2numpy(v, cuda=True):
     else:
         return v.data.numpy()
 
-def numpy2variable(a, cuda=True, volatile=False):
+
+def numpy2variable(a: np.array, cuda=True, volatile=False, dtype=None):
+    if dtype is not None:
+        a = np.array(a, dtype=dtype)
     t = torch.from_numpy(a)
     if cuda:
         t = t.cuda()
