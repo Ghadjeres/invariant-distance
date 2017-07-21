@@ -4,7 +4,8 @@ import numpy as np
 def spearman_rho(v1, v2):
     assert len(v1.shape) == 1
     assert len(v1) == len(v2)
-    l = len(v1)
+    # l = len(v1)
+    l = 128
     # apply function
     f = lambda x: x
     # f = lambda x: np.power(x, 1/2)
@@ -15,7 +16,6 @@ def spearman_rho(v1, v2):
     r2 = squash(rankdata(-v2, method='average'))
 
     # print number of zeros
-    # TODO understand why it's null
     # print('Spearman:')
     # print(sum(v1 > 1), sum(v2 > 1))
     # print(sum(v1 > 0), sum(v2 > 0))

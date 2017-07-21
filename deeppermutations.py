@@ -112,7 +112,7 @@ if __name__ == '__main__':
     distance_model_kwargs = dict(
         reg=None,
         # reg=None,
-        dropout_prob=0.001,
+        dropout_prob=0.3,
         num_layers=2,
         num_units_lstm=num_units_lstm,
     )
@@ -139,7 +139,7 @@ if __name__ == '__main__':
 
     model_manager = ModelManager(model=invariant_distance,
                                  lr=1e-4,
-                                 lambda_reg=1.e-2
+                                 lambda_reg=5.
                                  )
     model_manager.load()
     if train:
@@ -148,13 +148,13 @@ if __name__ == '__main__':
                                   batches_per_epoch=batches_per_epoch,
                                   plot=True,
                                   save_every=2,
-                                  reg_norm=None
+                                  reg_norm='l1'
                                   )
 
-    # invariant_distance.find_nearests(
-    #     target_seq=None,
-    #     show_results=True,
-    #     num_elements=5000)
+    invariant_distance.find_nearests(
+        target_seq=None,
+        show_results=True,
+        num_elements=2000)
     # todo show pred
     # invariant_distance_model.test_transpose_out_of_bounds(
     #     effective_timestep=32)
