@@ -145,13 +145,10 @@ if __name__ == '__main__':
                                   reg_norm=2
                                   )
 
-    # invariant_distance_model.find_nearests(
-    #     next(invariant_distance_model.generator(batch_size=1,
-    #                                             phase='all',
-    #                                             effective_timestep=32))[0],
-    #     show_results=True,
-    #     effective_timestep=32,
-    #     num_elements=1000)
+    invariant_distance.find_nearests(
+        target_seq=None,
+        show_results=True,
+        num_elements=20000)
     # invariant_distance_model.show_preds(effective_timestep=32)
     # invariant_distance_model.test_transpose_out_of_bounds(
     #     effective_timestep=32)

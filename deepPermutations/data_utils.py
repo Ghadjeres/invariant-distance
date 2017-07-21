@@ -5,8 +5,9 @@ Created on 7 mars 2016
 
 @author: Gaetan Hadjeres
 """
-import pickle
 import os
+import pickle
+
 import numpy as np
 from music21 import corpus, converter, stream, note, duration, interval
 from music21.analysis.floatingKey import FloatingKeyException
@@ -35,6 +36,12 @@ SEQ = 0
 META = 1
 OFFSET = 2
 
+
+def variable2numpy(v, cuda=True):
+    if cuda:
+        return v.data.cpu().numpy()
+    else:
+        return v.data.numpy()
 
 def to_pitch_class(note_str):
     s = ''
@@ -410,6 +417,28 @@ def first_note_index(indexed_seq, time_index_start, time_index_end,
             return indexed_seq[t]
     return note2index[SLUR_SYMBOL]
 
+
+def chorale_onehot_to_indexed_chorale(onehot_chorale, num_pitches,
+                                      time_major=True):
+    """
+
+    :param onehot_chorale: (time, num_features)
+    :param num_pitches:
+    :return: (time, voice) chorale of indexes if time_major
+     else (voice, time)
+    """
+    indexed_chorale = np.zeros((onehot_chorale.shape[0], len(num_pitches)))
+    chorale_length = indexed_chorale.shape[0]
+    offset = 0
+    for voice_index, num_pitch in enumerate(num_pitches):
+        for t in range(chorale_length):
+            indexed_chorale[t, voice_index] = onehot_chorale[t,
+                                              offset: offset + num_pitch].argmax()
+        offset += num_pitch
+    if time_major:
+        return indexed_chorale
+    else:
+        return np.transpose(indexed_chorale, axes=(1, 0))
 
 
 def seq_to_stream(seq):

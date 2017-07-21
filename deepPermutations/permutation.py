@@ -153,27 +153,7 @@ def permutation_distance(input_1, input_2, distance_model):
                         distance_model.predict(input_2, batch_size=2)[0])
 
 
-def chorale_onehot_to_indexed_chorale(onehot_chorale, num_pitches,
-                                      time_major=True):
-    """
 
-    :param onehot_chorale: (time, num_features)
-    :param num_pitches:
-    :return: (time, voice) chorale of indexes if time_major
-     else (voice, time)
-    """
-    indexed_chorale = np.zeros((onehot_chorale.shape[0], len(num_pitches)))
-    chorale_length = indexed_chorale.shape[0]
-    offset = 0
-    for voice_index, num_pitch in enumerate(num_pitches):
-        for t in range(chorale_length):
-            indexed_chorale[t, voice_index] = onehot_chorale[t,
-                                              offset: offset + num_pitch].argmax()
-        offset += num_pitch
-    if time_major:
-        return indexed_chorale
-    else:
-        return np.transpose(indexed_chorale, axes=(1, 0))
 
 
 def gibbs(generation_models=None, hidden_repr_model=None,

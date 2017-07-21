@@ -6,11 +6,12 @@ from itertools import islice
 import numpy as np
 import torch
 import torch.nn.functional as F
-
-from deepPermutations.data_utils import PACKAGE_DIR
-from deepPermutations.data_preprocessing import SOP_INDEX
+from deepPermutations.data_preprocessing import SOP_INDEX, indexed_seq_to_score
+from deepPermutations.data_utils import PACKAGE_DIR, \
+    chorale_onehot_to_indexed_chorale, variable2numpy
 from deepPermutations.data_utils import START_SYMBOL, END_SYMBOL, \
     first_note_index
+from deepPermutations.permutation_distance import spearman_rho
 from torch import nn
 from torch.autograd import Variable
 from tqdm import tqdm
@@ -62,6 +63,25 @@ class SequentialModel(nn.Module):
     def generator(self, batch_size, phase, percentage_train=0.8, **kwargs):
         raise NotImplementedError
 
+    def hidden_init(self, batch_size, hidden_size, volatile=False) -> Variable:
+        hidden = (Variable(torch.rand(self.num_layers, batch_size,
+                                      hidden_size).cuda(),
+                           volatile=volatile),
+                  Variable(torch.rand(self.num_layers, batch_size,
+                                      hidden_size).cuda(),
+                           volatile=volatile))
+        return hidden
+
+    def no_data_init(self, seq_length,
+                     batch_size,
+                     input_size,
+                     volatile=False) -> Variable:
+        no_data = Variable(torch.cat(
+            (torch.zeros(seq_length - 1, batch_size, input_size),
+             torch.ones(seq_length - 1, batch_size, 1)), 2).cuda(),
+                           volatile=volatile)
+        return no_data
+
     def save(self):
         torch.save(self.state_dict(), self.filepath)
 
@@ -69,41 +89,45 @@ class SequentialModel(nn.Module):
         state_dict = torch.load(self.filepath)
         self.load_state_dict(state_dict)
 
-    def find_nearests(self, features, num_elements=1000, show_results=False,
-                      effective_timestep=None):
+    def find_nearests(self, target_seq, num_elements=1000, show_results=False):
         """
+        :param target_seq: 1D torch.LongTensor
+        :type target_seq:
 
-        :param num_elements:
-        :param features:
-        :return: features produced by generator that achieve minimum distance
         """
-        # TODO
-        NotImplementedError
-        # max_dist = -10
         max_dist = 100000
-        num_pitches = list(map(len, self.dataset[3]))
 
-        if effective_timestep:
-            generator_unitary = self.generator(batch_size=1, phase='all',
-                                               effective_timestep=effective_timestep)
+        generator_unitary = self.generator(batch_size=1,
+                                           phase='all')
+
+        if target_seq is None:
+            target_chorale, _, _, _ = next(generator_unitary)
         else:
-            generator_unitary = self.generator_unitary
+            target_chorale = target_seq[None, :]
+        target_chorale_cuda = Variable(target_chorale.cuda())
 
-        min_chorale = features
-        hidden_repr = self.hidden_repr_model.predict(features, batch_size=1)
+        hidden_repr = self.hidden_repr(target_chorale_cuda)
         intermediate_results = []
-        for features_gen in tqdm(islice(generator_unitary, num_elements)):
-            hidden_repr_gen = self.hidden_repr_model.predict(features_gen[0],
-                                                             batch_size=1)
+        for next_element in tqdm(islice(generator_unitary, num_elements)):
+
+            # to cuda Variable
+            next_element_cuda = [
+                Variable(tensor.cuda())
+                for tensor in next_element
+            ]
+            input_cuda, _, _, _ = next_element_cuda
+
+            hidden_repr_gen = self.hidden_repr(input_cuda)
 
             # dist = spearmanr(hidden_repr[0], hidden_repr_gen[0])[0]
-            dist = spearman_rho(hidden_repr[0], hidden_repr_gen[0])
+            dist = spearman_rho(variable2numpy(hidden_repr[0]),
+                                variable2numpy(hidden_repr_gen[0]))
 
             # if dist > max_dist:
             if dist < max_dist:
                 # if dist < 100:
                 max_dist = dist
-                min_chorale = features_gen
+                min_chorale = variable2numpy(input_cuda)
                 print(max_dist)
 
                 intermediate_results.append(min_chorale)
@@ -112,23 +136,18 @@ class SequentialModel(nn.Module):
         print(max_dist)
         if show_results:
             # concat all results
-            nearest_chorale = np.concatenate([features['input_seq'][0]] +
+            nearest_chorale = np.concatenate([target_chorale[SOP_INDEX].numpy()] +
                                              [np.array(
-                                                 nearest_chorale_inputs[0][
-                                                     'input_seq'][0])
-                                                 for nearest_chorale_inputs in
+                                                 nearest_chorales[SOP_INDEX])
+                                                 for nearest_chorales in
                                                  intermediate_results],
                                              axis=0)
 
-            # create score nearest
-            nearest_chorale_seq = chorale_onehot_to_indexed_chorale(
-                onehot_chorale=nearest_chorale,
-                num_pitches=num_pitches,
-                time_major=False)
-
-            score_nearest = indexed_seq_to_score(nearest_chorale_seq[0],
-                                                 self.index2notes[SOP_INDEX],
-                                                 self.note2indexes[SOP_INDEX])
+            _, _, index2notes, note2indexes, _ = pickle.load(open(
+                self.dataset_filepath, 'rb'))
+            score_nearest = indexed_seq_to_score(nearest_chorale,
+                                                 index2notes[SOP_INDEX],
+                                                 note2indexes[SOP_INDEX])
             score_nearest.show()
         return min_chorale, intermediate_results
 
@@ -178,30 +197,35 @@ class InvariantDistance(SequentialModel):
         batch_size, seq_length = inputs[0].size()
         assert seq_length == self.timesteps
 
-        hiddens = [self.hidden_init(batch_size, self.num_lstm_units)
-                   for _ in range(len(inputs))]
-        hidden_reprs = [self.hidden_repr(input, hidden)
-                        for input, hidden in zip(inputs, hiddens)]
+        hidden_reprs = [self.hidden_repr(input)
+                        for input in inputs]
 
         hidden_repr_1, hidden_repr_2 = hidden_reprs
         diff = hidden_repr_1 - hidden_repr_2
         mean = (hidden_repr_1 + hidden_repr_2) / 2
 
-        hidden = self.hidden_init(batch_size,
-                                  self.num_lstm_units
-                                  )
-
         weights, softmax = self.decode(hidden_repr=mean,
                                        first_note=first_note,
-                                       hidden=hidden,
                                        sequence_length=seq_length)
         return weights, softmax, diff
 
-    def hidden_repr(self, input, hidden):
+    def hidden_repr(self, input):
+        """
+
+        :param input:
+        :type input:
+        :param hidden:
+        :type hidden:
+        :return: (batch_size, hidden_repr_dim)
+        :rtype:
+        """
         # todo check dimensions
+        batch_size, _ = input.size()
         embedding = self.embedding(input)
         embedding_time_major = torch.transpose(
             embedding, 0, 1)
+
+        hidden = self.hidden_init(batch_size, self.num_lstm_units)
 
         outputs_lstm, _ = self.lstm_e(embedding_time_major, hidden)
         last_output = outputs_lstm[-1]
@@ -211,7 +235,7 @@ class InvariantDistance(SequentialModel):
         else:
             return last_output
 
-    def decode(self, hidden_repr, first_note, hidden, sequence_length):
+    def decode(self, hidden_repr, first_note, sequence_length):
         """
 
         :param hidden_repr:(batch_size, hidden_repr_size)
@@ -230,6 +254,11 @@ class InvariantDistance(SequentialModel):
         no_data = self.no_data_init(seq_length=sequence_length,
                                     batch_size=batch_size,
                                     input_size=input.size()[1])
+
+        hidden = self.hidden_init(batch_size,
+                                  self.num_lstm_units
+                                  )
+
         # input_size = input.size()
         # input_as_seq = torch.cat((
         #     input[None, :, :],
@@ -251,25 +280,6 @@ class InvariantDistance(SequentialModel):
         weights = torch.cat(weights)
         weights = weights.view(self.timesteps, batch_size, self.num_pitches)
         return weights, softmax
-
-    def hidden_init(self, batch_size, hidden_size, volatile=False) -> Variable:
-        hidden = (Variable(torch.rand(self.num_layers, batch_size,
-                                      hidden_size).cuda(),
-                           volatile=volatile),
-                  Variable(torch.rand(self.num_layers, batch_size,
-                                      hidden_size).cuda(),
-                           volatile=volatile))
-        return hidden
-
-    def no_data_init(self, seq_length,
-                     batch_size,
-                     input_size,
-                     volatile=False) -> Variable:
-        no_data = Variable(torch.cat(
-            (torch.zeros(seq_length - 1, batch_size, input_size),
-             torch.ones(seq_length - 1, batch_size, 1)), 2).cuda(),
-                           volatile=volatile)
-        return no_data
 
     def numpy_indexed2chunk(self, indexed_chorale,
                             start_symbols,
