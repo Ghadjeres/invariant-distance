@@ -364,7 +364,7 @@ class Distance(SequentialModel):
 
         # TODO add repr_size
         self.lstm_d = nn.LSTM(
-            input_size=self.num_lstm_units + self.embedding_dim + 1,
+            input_size=self.num_lstm_units + 1,
             hidden_size=self.num_lstm_units,
             num_layers=self.num_layers,
             dropout=dropout_prob)
@@ -421,11 +421,8 @@ class Distance(SequentialModel):
         """
         # transform input as seq
         batch_size, hidden_repr_size = hidden_repr.size()
-        embedded_note = self.embedding(first_note)
 
-        input = torch.cat((hidden_repr,
-                           embedded_note),
-                          1)
+        input = hidden_repr
 
         no_data = self.no_data_init(seq_length=sequence_length,
                                     batch_size=batch_size,
