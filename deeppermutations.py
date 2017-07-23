@@ -4,7 +4,7 @@ import os
 from deepPermutations.data_preprocessing import \
     initialize_transposition_dataset
 from deepPermutations.model_manager import ModelManager
-from deepPermutations.sequential_model import InvariantDistanceRelu
+from deepPermutations.sequential_model import InvariantDistanceRelu, Distance
 
 
 def get_arguments():
@@ -109,13 +109,6 @@ if __name__ == '__main__':
             metadatas=metadatas)
 
     # INVARIANT DISTANCE
-    distance_model_kwargs = dict(
-        reg=None,
-        # reg=None,
-        dropout_prob=0.3,
-        num_layers=2,
-        num_units_lstm=num_units_lstm,
-    )
 
     # invariant_distance = InvariantDistance(
     #     dataset_name=pickle_filepath,
@@ -124,13 +117,30 @@ if __name__ == '__main__':
     #     **distance_model_kwargs
     # )
 
-    invariant_distance = InvariantDistanceRelu(
+    # invariant_distance = InvariantDistanceRelu(
+    #     dataset_name=pickle_filepath,
+    #     timesteps=timesteps,
+    #     num_pitches=55,
+    #     mlp_hidden_size=num_dense,
+    #     **distance_model_kwargs
+    # )
+
+    distance_model_kwargs = dict(
+        reg=None,
+        dropout_prob=0.3,
+        num_layers=2,
+        num_units_lstm=num_units_lstm,
+    )
+
+    invariant_distance = Distance(
         dataset_name=pickle_filepath,
         timesteps=timesteps,
         num_pitches=55,
         mlp_hidden_size=num_dense,
+        relu=True,
         **distance_model_kwargs
     )
+
 
     # gen = invariant_distance.generator(batch_size=batch_size,
     #                                    phase='all',
@@ -141,14 +151,14 @@ if __name__ == '__main__':
                                  lr=1e-3,
                                  lambda_reg=1.
                                  )
-    model_manager.load()
+    # model_manager.load()
     if train:
         model_manager.train_model(batch_size=batch_size,
                                   num_epochs=num_epochs,
                                   batches_per_epoch=batches_per_epoch,
                                   plot=True,
                                   save_every=2,
-                                  reg_norm='l1'
+                                  reg_norm=None
                                   )
 
     # invariant_distance.find_nearests(

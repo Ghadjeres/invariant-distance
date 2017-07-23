@@ -339,15 +339,17 @@ class Distance(SequentialModel):
                  dropout_prob=0.2,
                  num_layers=1,
                  embedding_dim=16,
-                 non_linearity=None,
+                 add_relu=True,
                  model_type='distance',
                  **kwargs):
+        if add_relu:
+            model_type += '_relu'
         super(Distance, self).__init__(model_type,
                                        dataset_name,
                                        num_pitches,
                                        timesteps,
                                        **kwargs)
-        self.non_linearity = non_linearity
+        self.add_relu = add_relu
         self.embedding_dim = embedding_dim
         self.num_lstm_units = num_units_lstm
         self.num_layers = num_layers
@@ -369,10 +371,12 @@ class Distance(SequentialModel):
 
         self.linear_out = nn.Linear(in_features=self.num_lstm_units,
                                     out_features=num_pitches)
+        self.relu = nn.ReLU()
 
-    def forward(self, input, first_note):
-        # todo add hidden to inputs?
-        batch_size, seq_length = input[0].size()
+    def forward(self, inputs, first_note):
+        # only first input is used!
+        input = inputs[0]
+        batch_size, seq_length = input.size()
         assert seq_length == self.timesteps
 
         hidden_repr = self.hidden_repr(input)
@@ -402,10 +406,10 @@ class Distance(SequentialModel):
         outputs_lstm, _ = self.lstm_e(embedding_time_major, hidden)
         last_output = outputs_lstm[-1]
 
-        if self.non_linearity:
-            NotImplementedError
-        else:
-            return last_output
+        if self.add_relu:
+            last_output = self.relu(last_output)
+
+        return last_output
 
     def decode(self, hidden_repr, first_note, sequence_length):
         """
@@ -526,9 +530,9 @@ class Distance(SequentialModel):
 
                 # input_1, input_2, first_note, output
                 next_element = (torch_sequences[0],
-                                torch_sequences[1],
+                                torch_sequences[0],
                                 torch_first_notes,
-                                torch_sequences[2],
+                                torch_sequences[0],
                                 )
                 yield next_element
 
