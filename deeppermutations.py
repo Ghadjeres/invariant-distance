@@ -138,8 +138,8 @@ if __name__ == '__main__':
     # next(gen)
 
     model_manager = ModelManager(model=invariant_distance,
-                                 lr=1e-4,
-                                 lambda_reg=5.
+                                 lr=1e-3,
+                                 lambda_reg=1.
                                  )
     model_manager.load()
     if train:
@@ -151,14 +151,14 @@ if __name__ == '__main__':
                                   reg_norm='l1'
                                   )
 
-    invariant_distance.find_nearests(
-        target_seq=None,
-        show_results=True,
-        num_elements=2000)
+    # invariant_distance.find_nearests(
+    #     target_seq=None,
+    #     show_results=True,
+    #     num_elements=10000)
     # todo show pred
     # invariant_distance_model.test_transpose_out_of_bounds(
     #     effective_timestep=32)
-    invariant_distance.compute_stats(chorale_index=0, num_elements=2000)
+    invariant_distance.compute_stats(chorale_index=0, num_elements=10000)
     invariant_distance.show_mean_distance_matrix(chorale_index=241,
                                                  show_plot=True)
     # invariant_distance_model.show_mean_distance_matrix(chorale_index=0,

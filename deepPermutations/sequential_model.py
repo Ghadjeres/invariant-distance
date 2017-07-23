@@ -241,7 +241,11 @@ class SequentialModel(nn.Module):
             print(mean)
             print(std)
 
-    def compute_stats(self, chorale_index=0, num_elements=1000, timesteps=32):
+    def compute_stats(self,
+                      chorale_index=0,
+                      num_elements=1000,
+                      timesteps=32,
+                      export_filename='results/stats.csv'):
         """
 
         :param num_elements:
@@ -308,6 +312,14 @@ class SequentialModel(nn.Module):
 
         hist_data = [distance_diff, distance_same]
 
+        # save into file
+        with open(os.path.join(PACKAGE_DIR,
+                               export_filename), 'w') as f:
+            f.write(f'distance, label\n')
+            for i, label in enumerate(['random', 'transposition']):
+                for d in hist_data[i]:
+                    f.write(f'{d}, {label}\n')
+
         import seaborn as sns
         from matplotlib import pyplot as plt
         sns.set()
@@ -315,6 +327,7 @@ class SequentialModel(nn.Module):
         for a in hist_data:
             sns.distplot(a, ax=ax, kde=True)
         sns.plt.show()
+
 
 # TODO  clean refactor
 class Distance(SequentialModel):
@@ -769,7 +782,8 @@ class InvariantDistanceRelu(InvariantDistance):
                                       out_features=mlp_hidden_size)
         self.linear_2_mlp = nn.Linear(in_features=mlp_hidden_size,
                                       out_features=self.num_lstm_units)
-        self.prelu = nn.PReLU()
+        # self.prelu = nn.PReLU()
+        self.prelu = nn.ReLU()
 
     def hidden_repr(self, input):
         hidden_no_relu = super(InvariantDistanceRelu, self).hidden_repr(

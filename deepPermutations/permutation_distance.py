@@ -4,8 +4,9 @@ import numpy as np
 def spearman_rho(v1, v2):
     assert len(v1.shape) == 1
     assert len(v1) == len(v2)
-    # l = len(v1)
+    l = len(v1)
     l = 128
+    # l = 256
     # apply function
     f = lambda x: x
     # f = lambda x: np.power(x, 1/2)
