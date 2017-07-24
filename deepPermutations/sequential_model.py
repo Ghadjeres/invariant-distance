@@ -1,4 +1,5 @@
 import collections
+import heapq
 import os
 import pickle
 from itertools import islice
@@ -122,7 +123,6 @@ class SequentialModel(nn.Module):
 
         """
         self.eval()
-        max_dist = 100000
         generator_unitary = self.generator(batch_size=1,
                                            phase='all')
 
@@ -135,7 +135,6 @@ class SequentialModel(nn.Module):
         hidden_repr = self.hidden_repr(target_chorale_cuda)
         intermediate_results = []
         for next_element in tqdm(islice(generator_unitary, num_elements)):
-
             # to cuda Variable
             next_element_cuda = [
                 Variable(tensor.cuda())
@@ -149,25 +148,39 @@ class SequentialModel(nn.Module):
             dist = spearman_rho(variable2numpy(hidden_repr[0]),
                                 variable2numpy(hidden_repr_gen[0]))
 
-            # if dist > max_dist:
-            if dist < max_dist:
-                # if dist < 100:
-                max_dist = dist
-                min_chorale = variable2numpy(input_cuda)
-                print(max_dist)
+            # # if dist > max_dist:
+            # if dist < max_dist:
+            #     # if dist < 100:
+            #     max_dist = dist
+            #     min_chorale = variable2numpy(input_cuda)
+            #     print(max_dist)
+            #     intermediate_results.append(min_chorale)
 
-                intermediate_results.append(min_chorale)
+            chorale = variable2numpy(input_cuda)
 
-        intermediate_results.append(min_chorale)
-        print(max_dist)
+            heapq.heappush(intermediate_results,
+                           (dist, chorale)
+                           )
+
         if show_results:
+            nearest_chorales = [
+                chorale
+                for dist, chorale in heapq.nsmallest(20,
+                                                     intermediate_results,
+                                                     key=lambda e: e[0])]
+
+            for dist, chorale in heapq.nsmallest(20,
+                                                 intermediate_results,
+                                                 key=lambda e: e[0]):
+                print(dist)
+
             # concat all results
             nearest_chorale = np.concatenate(
                 [target_chorale[SOP_INDEX].numpy()] +
                 [np.array(
-                    nearest_chorales[SOP_INDEX])
-                    for nearest_chorales in
-                    intermediate_results],
+                    nearest_chorale[SOP_INDEX])
+                    for nearest_chorale in
+                    nearest_chorales],
                 axis=0)
 
             _, _, index2notes, note2indexes, _ = pickle.load(open(
@@ -176,7 +189,7 @@ class SequentialModel(nn.Module):
                                                  index2notes[SOP_INDEX],
                                                  note2indexes[SOP_INDEX])
             score_nearest.show()
-        return min_chorale, intermediate_results
+        return nearest_chorales
 
     def show_mean_distance_matrix(self, chorale_index=0,
                                   show_plot=False):

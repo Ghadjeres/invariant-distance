@@ -110,6 +110,13 @@ if __name__ == '__main__':
 
     # INVARIANT DISTANCE
 
+    distance_model_kwargs = dict(
+        reg=None,
+        dropout_prob=0.3,
+        num_layers=2,
+        num_units_lstm=num_units_lstm,
+    )
+
     # invariant_distance = InvariantDistance(
     #     dataset_name=pickle_filepath,
     #     timesteps=timesteps,
@@ -125,12 +132,6 @@ if __name__ == '__main__':
     #     **distance_model_kwargs
     # )
 
-    distance_model_kwargs = dict(
-        reg=None,
-        dropout_prob=0.3,
-        num_layers=2,
-        num_units_lstm=num_units_lstm,
-    )
 
     invariant_distance = Distance(
         dataset_name=pickle_filepath,
@@ -151,7 +152,7 @@ if __name__ == '__main__':
                                  lr=1e-3,
                                  lambda_reg=1.
                                  )
-    # model_manager.load()
+    model_manager.load()
     if train:
         model_manager.train_model(batch_size=batch_size,
                                   num_epochs=num_epochs,
@@ -161,10 +162,10 @@ if __name__ == '__main__':
                                   reg_norm=None
                                   )
 
-    # invariant_distance.find_nearests(
-    #     target_seq=None,
-    #     show_results=True,
-    #     num_elements=10000)
+    invariant_distance.find_nearests(
+        target_seq=None,
+        show_results=True,
+        num_elements=30000)
     # todo show pred
     # invariant_distance_model.test_transpose_out_of_bounds(
     #     effective_timestep=32)
