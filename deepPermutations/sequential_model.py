@@ -83,6 +83,53 @@ class SequentialModel(nn.Module):
                            volatile=volatile)
         return no_data
 
+    def generator_dataset(self, batch_size, phase, percentage_train=0.8,
+                          **kwargs):
+        """
+
+        :param batch_size:
+        :param phase:
+        :param percentage_train:
+        :return:
+        """
+        X, voice_ids, index2notes, note2indexes, metadatas = pickle.load(
+            open(self.dataset_filepath, 'rb'))
+
+        start_symbols = np.array(list(
+            map(lambda note2index: note2index[START_SYMBOL],
+                note2indexes)))[SOP_INDEX]
+        end_symbols = np.array(list(
+            map(lambda note2index: note2index[END_SYMBOL], note2indexes)))[
+            SOP_INDEX]
+
+        # Set chorale_indices
+        if phase == 'train':
+            chorale_indices = np.arange(int(len(X) * percentage_train))
+        elif phase == 'test':
+            chorale_indices = np.arange(int(len(X) * percentage_train), len(X))
+        elif phase == 'all':
+            chorale_indices = np.arange(int(len(X)))
+        else:
+            NotImplementedError
+
+        for chorale_index in chorale_indices:
+            chorales = X[chorale_index]
+            for chorale in chorales:
+                # there's padding of size timesteps before and after
+                chorale_length = len(
+                    chorales[0][0][SOP_INDEX]) + 2 * self.timesteps
+                for time_index in range(chorale_length - self.timesteps):
+                    indexed_chorale, _, offset = np.array(
+                        chorale)
+                    # padding of size timesteps
+                    chunk = self.numpy_indexed2chunk(indexed_chorale,
+                                                     start_symbols,
+                                                     end_symbols,
+                                                     time_index)
+
+                    torch_chunk = torch.from_numpy(np.array(chunk))
+                    yield torch_chunk
+
     def numpy_indexed2chunk(self, indexed_chorale,
                             start_symbols,
                             end_symbols,
@@ -168,11 +215,11 @@ class SequentialModel(nn.Module):
                 for dist, chorale in heapq.nsmallest(20,
                                                      intermediate_results,
                                                      key=lambda e: e[0])]
-
-            for dist, chorale in heapq.nsmallest(20,
-                                                 intermediate_results,
-                                                 key=lambda e: e[0]):
-                print(dist)
+            #
+            # for dist, chorale in heapq.nsmallest(20,
+            #                                      intermediate_results,
+            #                                      key=lambda e: e[0]):
+            #     print(dist)
 
             # concat all results
             nearest_chorale = np.concatenate(
@@ -339,10 +386,9 @@ class SequentialModel(nn.Module):
         fig, ax = plt.subplots()
         for a in hist_data:
             sns.distplot(a, ax=ax, kde=True)
-        sns.plt.show()
+        sns.plt.show()  # TODO  clean refactor
 
 
-# TODO  clean refactor
 class Distance(SequentialModel):
     def __init__(self,
                  dataset_name,
