@@ -83,7 +83,7 @@ class SequentialModel(nn.Module):
                            volatile=volatile)
         return no_data
 
-    def generator_dataset(self, batch_size, phase, percentage_train=0.8,
+    def generator_dataset(self, phase, percentage_train=0.8,
                           **kwargs):
         """
 
@@ -181,7 +181,8 @@ class SequentialModel(nn.Module):
 
         hidden_repr = self.hidden_repr(target_chorale_cuda)
         intermediate_results = []
-        for next_element in tqdm(islice(generator_unitary, num_elements)):
+        for id, next_element in tqdm(enumerate(islice(generator_unitary,
+                                                  num_elements))):
             # to cuda Variable
             next_element_cuda = [
                 Variable(tensor.cuda())
@@ -206,15 +207,86 @@ class SequentialModel(nn.Module):
             chorale = variable2numpy(input_cuda)
 
             heapq.heappush(intermediate_results,
-                           (dist, chorale)
+                           (dist, id, chorale)
                            )
 
         if show_results:
             nearest_chorales = [
                 chorale
-                for dist, chorale in heapq.nsmallest(20,
+                for dist, id, chorale in heapq.nsmallest(20,
                                                      intermediate_results,
                                                      key=lambda e: e[0])]
+            #
+            # for dist, chorale in heapq.nsmallest(20,
+            #                                      intermediate_results,
+            #                                      key=lambda e: e[0]):
+            #     print(dist)
+
+            # concat all results
+            nearest_chorale = np.concatenate(
+                [target_chorale[SOP_INDEX].numpy()] +
+                [np.array(
+                    nearest_chorale[SOP_INDEX])
+                    for nearest_chorale in
+                    nearest_chorales],
+                axis=0)
+
+            _, _, index2notes, note2indexes, _ = pickle.load(open(
+                self.dataset_filepath, 'rb'))
+            score_nearest = indexed_seq_to_score(nearest_chorale,
+                                                 index2notes[SOP_INDEX],
+                                                 note2indexes[SOP_INDEX])
+            score_nearest.show()
+        return nearest_chorales
+
+    def find_nearests_all(self, target_seq, num_nearests=20,
+                          show_results=False):
+        """
+        :param target_seq: 1D torch.LongTensor
+        :type target_seq:
+
+        """
+        self.eval()
+        generator_dataset = self.generator_dataset(
+            phase='all')
+
+        generator_unitary = self.generator(
+            batch_size=1,
+            phase='all')
+
+        if target_seq is None:
+            target_chorale, _, _, _ = next(generator_unitary)
+        else:
+            target_chorale = target_seq[None, :]
+        target_chorale_cuda = Variable(target_chorale.cuda())
+
+        hidden_repr = self.hidden_repr(target_chorale_cuda)
+        intermediate_results = []
+        for id, chunk in enumerate(generator_dataset):
+            # to cuda Variable
+            input_cuda = Variable(chunk.cuda())[None, :]
+
+            hidden_repr_gen = self.hidden_repr(input_cuda)
+
+            dist = spearman_rho(variable2numpy(hidden_repr[0]),
+                                variable2numpy(hidden_repr_gen[0]))
+
+            chorale = variable2numpy(input_cuda)
+
+            heapq.heappush(intermediate_results,
+                           (dist, id, chorale)
+                           )
+
+            if len(intermediate_results) > 512:
+                intermediate_results = intermediate_results[:512]
+                heapq.heapify(intermediate_results)
+
+        if show_results:
+            nearest_chorales = [
+                chorale
+                for dist, id, chorale in heapq.nsmallest(num_nearests,
+                                                         intermediate_results,
+                                                         key=lambda e: e[0])]
             #
             # for dist, chorale in heapq.nsmallest(20,
             #                                      intermediate_results,
