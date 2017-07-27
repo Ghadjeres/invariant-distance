@@ -284,7 +284,8 @@ class SequentialModel(nn.Module):
             phase='all')
 
         if target_seq is None:
-            target_chorale, _, _, _ = next(generator_unitary)
+            next_element = next(generator_unitary)
+            target_chorale = next_element[0]
         else:
             target_chorale = target_seq[None, :]
         target_chorale_cuda = Variable(target_chorale.cuda())
@@ -551,6 +552,8 @@ class Distance(SequentialModel):
         # common layers
         self.non_linearity = non_linearity_from_name(non_linearity)
 
+        self.input_dropout_layer = nn.Dropout2d(input_dropout)
+
     def forward(self, input):
         batch_size, seq_length = input.size()
         assert seq_length == self.timesteps
@@ -575,6 +578,11 @@ class Distance(SequentialModel):
         embedding = self.embedding(input)
         embedding_time_major = torch.transpose(
             embedding, 0, 1)
+
+        # input_dropout
+        embedding_time_major = self.input_dropout_layer(
+            embedding_time_major[:, :, :, None]
+        )[:, :, :, 0]
 
         hidden = self.hidden_init(batch_size, self.num_lstm_units)
 
@@ -972,12 +980,10 @@ class InvariantDistanceRelu(InvariantDistance):
         hidden_repr_relu_1, hidden_repr_relu_2 = hidden_reprs_relu
         diff_relu = hidden_repr_relu_1 - hidden_repr_relu_2
 
-        # hidden_reprs = [self.linear_2_mlp(hidden_repr_relu)
-        #                 for hidden_repr_relu in hidden_reprs_relu]
         hidden_reprs = hidden_reprs_relu
 
         hidden_repr_1, hidden_repr_2 = hidden_reprs
-        # diff = hidden_repr_1 - hidden_repr_2
+
         mean = (hidden_repr_1 + hidden_repr_2) / 2
 
         weights, softmax = self.decode(hidden_repr=mean,
