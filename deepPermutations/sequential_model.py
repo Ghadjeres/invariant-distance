@@ -12,7 +12,7 @@ from deepPermutations.data_utils import PACKAGE_DIR, \
     variable2numpy, SEQ, numpy2variable
 from deepPermutations.data_utils import START_SYMBOL, END_SYMBOL, \
     first_note_index
-from deepPermutations.model_manager import crossentropy_loss
+from deepPermutations.losses import crossentropy_loss, accuracy
 from deepPermutations.permutation_distance import spearman_rho
 from torch import nn
 from torch.autograd import Variable
@@ -29,7 +29,6 @@ class SequentialModel(nn.Module):
                  dataset_name: str,
                  num_pitches=None,
                  timesteps=16,
-                 non_linearity=None,
                  **kwargs
                  ):
         """
@@ -61,11 +60,7 @@ class SequentialModel(nn.Module):
         # load generator
         self.generator_unitary = self.generator(phase='all', batch_size=1)
 
-        # unique filepath
-        kwargs.update({'non_linearity': non_linearity,
-                       })
-
-        od = collections.OrderedDict(sorted(self.kwargs.items()))
+        od = collections.OrderedDict(sorted(kwargs.items()))
         params_string = '_'.join(
             ['='.join(x) for x in zip(od.keys(), map(str, od.values()))])
 
@@ -78,9 +73,6 @@ class SequentialModel(nn.Module):
         self.filepath = os.path.join(model_dir,
                                      f'{params_string}.h5'
                                      )
-
-        # common layers
-        self.non_linearity = non_linearity_from_name(non_linearity)
 
     def __str__(self):
         return self.filepath
@@ -515,8 +507,8 @@ class Distance(SequentialModel):
     def __init__(self,
                  dataset_name,
                  timesteps,
-                 num_lstm_units=256,
                  num_pitches=None,
+                 num_lstm_units=256,
                  dropout_prob=0.2,
                  input_dropout=0.1,
                  num_layers=1,
@@ -528,10 +520,12 @@ class Distance(SequentialModel):
                                        dataset_name,
                                        num_pitches,
                                        timesteps,
-                                       non_linearity,
+                                       non_linearity=non_linearity,
                                        dropout_prob=dropout_prob,
                                        input_dropout=input_dropout,
-                                       num_lstm_units=num_lstm_units
+                                       num_lstm_units=num_lstm_units,
+                                       num_layers=num_layers,
+                                       embedding_dim=embedding_dim
                                        )
         self.embedding_dim = embedding_dim
         self.num_lstm_units = num_lstm_units
@@ -554,17 +548,17 @@ class Distance(SequentialModel):
         self.linear_out = nn.Linear(in_features=self.num_lstm_units,
                                     out_features=num_pitches)
 
-    def forward(self, inputs, first_note):
-        # only first input is used!
-        input = inputs[0]
+        # common layers
+        self.non_linearity = non_linearity_from_name(non_linearity)
+
+    def forward(self, input):
         batch_size, seq_length = input.size()
         assert seq_length == self.timesteps
 
         hidden_repr = self.hidden_repr(input)
         weights, softmax = self.decode(hidden_repr=hidden_repr,
-                                       first_note=first_note,
                                        sequence_length=seq_length)
-        return weights, softmax, 0
+        return weights, softmax
 
     def hidden_repr(self, input):
         """
@@ -592,7 +586,7 @@ class Distance(SequentialModel):
 
         return last_output
 
-    def decode(self, hidden_repr, first_note, sequence_length):
+    def decode(self, hidden_repr, sequence_length):
         """
 
         :param hidden_repr:(batch_size, hidden_repr_size)
@@ -629,7 +623,7 @@ class Distance(SequentialModel):
         weights = weights.view(self.timesteps, batch_size, self.num_pitches)
         return weights, softmax
 
-    def loss_function(self, next_element):
+    def loss_functions(self, next_element):
         # to cuda
         next_element_cuda = [
             Variable(tensor.cuda())
@@ -640,8 +634,9 @@ class Distance(SequentialModel):
 
         # mce_loss
         mce_loss = crossentropy_loss(weights, output)
-        return mce_loss
-
+        reg = Variable(torch.zeros(1).cuda())
+        acc = accuracy(weights, output)
+        return mce_loss, reg, acc
 
     def generator(self, batch_size, phase, percentage_train=0.8, **kwargs):
         """
