@@ -4,7 +4,7 @@ import os
 from deepPermutations.data_preprocessing import \
     initialize_transposition_dataset
 from deepPermutations.model_manager import ModelManager
-from deepPermutations.sequential_model import Distance
+from deepPermutations.sequential_model import Distance, InvariantDistance
 
 
 def get_arguments():
@@ -98,7 +98,17 @@ if __name__ == '__main__':
 
     # DISTANCE
     if is_invariant:
-        raise NotImplementedError
+        distance = InvariantDistance(
+            dataset_name=pickle_filepath,
+            timesteps=timesteps,
+            num_pitches=num_pitches,
+            num_lstm_units=num_lstm_units,
+            dropout_prob=dropout_prob,
+            input_dropout=input_dropout,
+            num_layers=num_layers,
+            embedding_dim=16,
+            non_linearity=non_linearity
+        )
     else:
         distance = Distance(
             dataset_name=pickle_filepath,
@@ -116,7 +126,7 @@ if __name__ == '__main__':
                                  lr=1e-3,
                                  lambda_reg=1.
                                  )
-    model_manager.load()
+    # model_manager.load()
     if train:
         model_manager.train_model(batch_size=batch_size,
                                   num_epochs=num_epochs,
@@ -135,7 +145,7 @@ if __name__ == '__main__':
     )
     exit()
 
-    invariant_distance.find_nearests(
+    distance.find_nearests(
         target_seq=None,
         show_results=True,
         num_elements=20000)

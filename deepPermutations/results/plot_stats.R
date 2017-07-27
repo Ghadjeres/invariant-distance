@@ -10,4 +10,8 @@ require(reshape2)
 df = read.csv('/home/gaetan/Projets/Python/workspace/DeepPermutations/deepPermutations/results/stats.csv',
 header = TRUE)
 
-ggplot(df, aes(x=distance, colour=label)) + geom_histogram()
+ggplot(df, aes(x=distance, fill=label)) + geom_density(alpha=0.1) 
+
+ggplot(df, aes(x=distance, fill=label)) + geom_histogram() 
++ facet_grid(.~label) 
++ xlim(0, 500)

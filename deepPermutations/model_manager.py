@@ -1,15 +1,15 @@
 from itertools import islice
 
 import torch
-from torch import nn
+from deepPermutations.losses import crossentropy_loss, accuracy
+from deepPermutations.sequential_model import SequentialModel
 from torch.autograd import Variable
 from tqdm import tqdm
-
-from deepPermutations.sequential_model import SequentialModel
 
 
 def variable2float(v: Variable):
     return float(v.data.cpu().numpy())
+
 
 def plot_init(res_size):
     """
@@ -42,53 +42,6 @@ def plot_res(axarr, epoch_index, fig, plt, res, res_size, res_val, x,
                               x, ys_val[res_index], 'r--')
     fig.canvas.draw()
     plt.pause(0.001)
-
-
-def crossentropy_loss(output_seq, targets_seq):
-    """
-    :param output_seq: (seq_length, batch_size, num_features)
-    of weights for each features
-    :type output_seq:
-    :param targets_seq: (batch_size, seq_length)
-    of class indexes (between 0 and num_features -1)
-    :type targets_seq:
-    :return:
-    :rtype:
-    """
-    targets_seq = torch.transpose(targets_seq, 0, 1)
-    assert output_seq.size()[:-1] == targets_seq.size()
-    seq_length, _, _ = output_seq.size()
-    cross_entropy = nn.CrossEntropyLoss(size_average=True)
-    sum = 0
-    for t in range(seq_length):
-        ce = cross_entropy(output_seq[t], targets_seq[t])
-        sum += ce
-    return sum
-
-
-def accuracy(output_seq, targets_seq):
-    """
-
-    :param output_seq: (seq_length, batch_size, num_features)
-    of weights for each features
-    :type output_seq:
-    :param targets_seq: (batch_size, seq_length)
-    of class indexes (between 0 and num_features -1)
-    :type targets_seq:
-    :return:
-    :rtype:
-    """
-    targets_seq = torch.transpose(targets_seq, 0, 1)
-    assert output_seq.size()[:-1] == targets_seq.size()
-    seq_length = output_seq.size()[0]
-    batch_size = output_seq.size()[1]
-    sum = 0
-    for t in range(seq_length):
-        max_values, max_indices = output_seq[t].max(1)
-        correct = max_indices[:, 0] == targets_seq[t]
-        sum += correct.data.sum() / batch_size
-
-    return sum / seq_length
 
 
 class ModelManager:
@@ -133,45 +86,16 @@ class ModelManager:
 
     def loss_and_acc(self, next_element, reg_norm, train):
 
-        # to cuda
-        next_element_cuda = [
-            Variable(tensor.cuda())
-            for tensor in next_element
-        ]
-
-        input_1, input_2, first_note, output = next_element_cuda
-
         self.optimizer.zero_grad()
 
-        # forward pass
-        inputs = (input_1, input_2)
-        weights, softmax, diff = self.model.forward(inputs, first_note)
-
-        # mce_loss
-        mce_loss = crossentropy_loss(weights, output)
-
-        # compute loss
-        loss = mce_loss
-
-        # regularization
-        if reg_norm is not None:
-            if reg_norm == 'l1':
-                reg = torch.abs(diff).sum(1).mean()
-            elif reg_norm == 'l2':
-                reg = torch.norm(diff, p=2, dim=1).mean()
-            else:
-                NotImplementedError
-            loss += self.lambda_reg * reg
-        else:
-            reg = Variable(torch.zeros(1), volatile=True)
+        mce_loss, reg, acc = self.model.loss_functions(next_element,
+                                                       reg_norm)
+        loss = mce_loss + self.lambda_reg * reg
 
         # backward pass and step
         if train:
             loss.backward()
             self.optimizer.step()
-
-        # accuracy
-        acc = accuracy(weights, output)
 
         # compute mean loss and accuracy
         return (variable2float(mce_loss),

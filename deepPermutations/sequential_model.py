@@ -228,23 +228,22 @@ class SequentialModel(nn.Module):
 
             hidden_repr_gen = self.hidden_repr(input_cuda)
 
+            # TODO see nearest_all
+            raise NotImplementedError
             # dist = spearmanr(hidden_repr[0], hidden_repr_gen[0])[0]
             dist = spearman_rho(variable2numpy(hidden_repr[0]),
                                 variable2numpy(hidden_repr_gen[0]))
 
-            # # if dist > max_dist:
-            # if dist < max_dist:
-            #     # if dist < 100:
-            #     max_dist = dist
-            #     min_chorale = variable2numpy(input_cuda)
-            #     print(max_dist)
-            #     intermediate_results.append(min_chorale)
-
             chorale = variable2numpy(input_cuda)
 
-            heapq.heappush(intermediate_results,
-                           (dist, id, chorale)
-                           )
+            intermediate_results.append(
+                (dist, id, chorale)
+            )
+
+            if len(intermediate_results) > 1024:
+                intermediate_results = sorted(intermediate_results,
+                                              key=lambda e: e[:2])
+                intermediate_results = intermediate_results[:num_nearests]
 
         if show_results:
             nearest_chorales = [
@@ -311,10 +310,13 @@ class SequentialModel(nn.Module):
         for id, chunk in tqdm(enumerate(generator_dataset)):
 
             if distance == 'edit':
+                chunk = Variable(chunk, volatile=True)
+                chorale = variable2numpy(chunk)
                 dist = distance_from_name(distance)(
                     target_chorale.numpy()[SOP_INDEX],
-                    variable2numpy(chunk)[SOP_INDEX]
+                    chorale
                 )
+                chorale = chorale[None, :]
             else:
                 # to cuda Variable
                 input_cuda = Variable(chunk.cuda())[None, :]
@@ -328,15 +330,16 @@ class SequentialModel(nn.Module):
 
                 chorale = variable2numpy(input_cuda)
 
-                heapq.heappush(intermediate_results,
-                               (dist, id, chorale)
-                               )
+            intermediate_results.append(
+                (dist, id, chorale)
+            )
 
-            if len(intermediate_results) > 512:
-                intermediate_results = intermediate_results[:512]
-                heapq.heapify(intermediate_results)
+            if len(intermediate_results) > 1024:
+                intermediate_results = sorted(intermediate_results,
+                                              key=lambda e: e[:2])
+                intermediate_results = intermediate_results[:num_nearests]
 
-            if id > 200000:
+            if id > 100000:
                 break
 
         if show_results:
@@ -575,9 +578,7 @@ class Distance(SequentialModel):
         self.linear_out = nn.Linear(in_features=self.num_lstm_units,
                                     out_features=num_pitches)
 
-        # common layers
         self.non_linearity = non_linearity_from_name(non_linearity)
-
         self.input_dropout_layer = nn.Dropout2d(input_dropout)
 
     def forward(self, input):
@@ -599,7 +600,6 @@ class Distance(SequentialModel):
         :return: (batch_size, hidden_repr_dim)
         :rtype:
         """
-        # todo check dimensions
         batch_size, _ = input.size()
         embedding = self.embedding(input)
         embedding_time_major = torch.transpose(
@@ -657,7 +657,7 @@ class Distance(SequentialModel):
         weights = weights.view(self.timesteps, batch_size, self.num_pitches)
         return weights, softmax
 
-    def loss_functions(self, next_element):
+    def loss_functions(self, next_element, *args, **kwargs):
         # to cuda
         next_element_cuda = [
             Variable(tensor.cuda())
@@ -741,26 +741,29 @@ class InvariantDistance(SequentialModel):
     def __init__(self,
                  dataset_name,
                  timesteps,
-                 num_units_lstm=256,
+                 num_lstm_units=256,
                  num_pitches=None,
                  dropout_prob=0.2,
                  num_layers=1,
                  embedding_dim=16,
                  non_linearity=None,
-                 model_type='invariant_distance',
                  input_dropout=0,
                  **kwargs):
+        model_type = 'invariant_distance'
         super(InvariantDistance, self).__init__(model_type,
                                                 dataset_name,
                                                 num_pitches,
                                                 timesteps,
+                                                non_linearity=non_linearity,
                                                 input_dropout=input_dropout,
-                                                **kwargs)
-        self.non_linearity = non_linearity
+                                                dropout_prob=dropout_prob,
+                                                num_lstm_units=num_lstm_units,
+                                                num_layers=num_layers,
+                                                embedding_dim=embedding_dim
+                                                )
         self.embedding_dim = embedding_dim
-        self.num_lstm_units = num_units_lstm
+        self.num_lstm_units = num_lstm_units
         self.num_layers = num_layers
-        self.input_dropout = input_dropout
 
         # Parameters
         self.embedding = nn.Embedding(num_embeddings=num_pitches,
@@ -770,7 +773,6 @@ class InvariantDistance(SequentialModel):
                               num_layers=self.num_layers,
                               dropout=dropout_prob)
 
-        # TODO add repr_size
         self.lstm_d = nn.LSTM(
             input_size=self.num_lstm_units + self.embedding_dim + 1,
             hidden_size=self.num_lstm_units,
@@ -780,10 +782,10 @@ class InvariantDistance(SequentialModel):
         self.linear_out = nn.Linear(in_features=self.num_lstm_units,
                                     out_features=num_pitches)
 
-        self.input_dropout = nn.Dropout(input_dropout)
+        self.non_linearity = non_linearity_from_name(non_linearity)
+        self.input_dropout_layer = nn.Dropout2d(input_dropout)
 
     def forward(self, inputs, first_note):
-        # todo add hidden to inputs?
         batch_size, seq_length = inputs[0].size()
         assert seq_length == self.timesteps
 
@@ -804,26 +806,28 @@ class InvariantDistance(SequentialModel):
 
         :param input:(batch_size, seq_length)
         :type input:
-        :param hidden:
-        :type hidden:
         :return: (batch_size, hidden_repr_dim)
         :rtype:
         """
-        # todo input_dropout?
         batch_size, _ = input.size()
         embedding = self.embedding(input)
         embedding_time_major = torch.transpose(
             embedding, 0, 1)
+
+        # input_dropout
+        embedding_time_major = self.input_dropout_layer(
+            embedding_time_major[:, :, :, None]
+        )[:, :, :, 0]
 
         hidden = self.hidden_init(batch_size, self.num_lstm_units)
 
         outputs_lstm, _ = self.lstm_e(embedding_time_major, hidden)
         last_output = outputs_lstm[-1]
 
-        if self.non_linearity:
-            NotImplementedError
-        else:
-            return last_output
+        # ReLU or nothing
+        last_output = self.non_linearity(last_output)
+
+        return last_output
 
     def decode(self, hidden_repr, first_note, sequence_length):
         """
@@ -849,12 +853,6 @@ class InvariantDistance(SequentialModel):
                                   self.num_lstm_units
                                   )
 
-        # input_size = input.size()
-        # input_as_seq = torch.cat((
-        #     input[None, :, :],
-        #     Variable(torch.zeros((self.timesteps - 1,) + input_size).cuda())
-        # ), 0)
-
         input_extended = torch.cat(
             (input[None, :, :], Variable(torch.zeros(1, batch_size, 1).cuda(
             ))), 2)
@@ -871,6 +869,36 @@ class InvariantDistance(SequentialModel):
         weights = weights.view(self.timesteps, batch_size, self.num_pitches)
         return weights, softmax
 
+    def loss_functions(self, next_element, reg_norm, **kwargs):
+        # to cuda
+        next_element_cuda = [
+            Variable(tensor.cuda())
+            for tensor in next_element
+        ]
+        input_1, input_2, first_note, output = next_element_cuda
+        inputs = (input_1, input_2)
+
+        weights, softmax, diff = self.forward(inputs,
+                                              first_note)
+
+        # mce_loss
+        mce_loss = crossentropy_loss(weights, output)
+
+        # regularization
+        if reg_norm is not None:
+            if reg_norm == 'l1':
+                reg = torch.abs(diff).sum(1).mean()
+            elif reg_norm == 'l2':
+                reg = torch.norm(diff, p=2, dim=1).mean()
+            else:
+                NotImplementedError
+        else:
+            reg = Variable(torch.zeros(1).cuda())
+
+        # accuracy
+        acc = accuracy(weights, output)
+        return mce_loss, reg, acc
+
     def generator(self, batch_size, phase, percentage_train=0.8, **kwargs):
         """
 
@@ -879,8 +907,6 @@ class InvariantDistance(SequentialModel):
         :param percentage_train:
         :return:
         """
-        # TODO effective timesteps?
-
         X, voice_ids, index2notes, note2indexes, metadatas = pickle.load(
             open(self.dataset_filepath, 'rb'))
 
@@ -957,64 +983,3 @@ class InvariantDistance(SequentialModel):
                 batch = 0
                 first_notes = []
                 sequences = [[] for _ in range(3)]
-
-
-class InvariantDistanceRelu(InvariantDistance):
-    def __init__(self,
-                 dataset_name,
-                 timesteps,
-                 num_units_lstm=256,
-                 num_pitches=None,
-                 dropout_prob=0.2,
-                 num_layers=1,
-                 embedding_dim=16,
-                 non_linearity=None,
-                 mlp_hidden_size=None,
-                 model_type='invariant_distance_relu',
-                 **kwargs):
-        super(InvariantDistanceRelu, self).__init__(model_type=model_type,
-                                                    dataset_name=dataset_name,
-                                                    timesteps=timesteps,
-                                                    num_units_lstm=num_units_lstm,
-                                                    num_pitches=num_pitches,
-                                                    dropout_prob=dropout_prob,
-                                                    num_layers=num_layers,
-                                                    embedding_dim=embedding_dim,
-                                                    non_linearity=non_linearity,
-                                                    **kwargs
-                                                    )
-        self.linear_1_mlp = nn.Linear(in_features=self.num_lstm_units,
-                                      out_features=mlp_hidden_size)
-        self.linear_2_mlp = nn.Linear(in_features=mlp_hidden_size,
-                                      out_features=self.num_lstm_units)
-
-        self.relu = nn.ReLU()
-
-    def hidden_repr(self, input):
-        hidden_no_relu = super(InvariantDistanceRelu, self).hidden_repr(
-            input=input)
-        return self.relu(hidden_no_relu)
-
-    def forward(self, inputs, first_note):
-        # todo add hidden to inputs?
-        batch_size, seq_length = inputs[0].size()
-        assert seq_length == self.timesteps
-
-        hidden_reprs_relu = [self.hidden_repr(input)
-                             for input in inputs]
-
-        hidden_repr_relu_1, hidden_repr_relu_2 = hidden_reprs_relu
-        diff_relu = hidden_repr_relu_1 - hidden_repr_relu_2
-
-        hidden_reprs = hidden_reprs_relu
-
-        hidden_repr_1, hidden_repr_2 = hidden_reprs
-
-        mean = (hidden_repr_1 + hidden_repr_2) / 2
-
-        weights, softmax = self.decode(hidden_repr=mean,
-                                       first_note=first_note,
-                                       sequence_length=seq_length)
-        return weights, softmax, diff_relu
-
-# TODO specific hidden_repr size
