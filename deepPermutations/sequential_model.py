@@ -12,6 +12,7 @@ from deepPermutations.data_utils import PACKAGE_DIR, \
     variable2numpy, SEQ, numpy2variable
 from deepPermutations.data_utils import START_SYMBOL, END_SYMBOL, \
     first_note_index
+from deepPermutations.model_manager import crossentropy_loss
 from deepPermutations.permutation_distance import spearman_rho
 from torch import nn
 from torch.autograd import Variable
@@ -23,34 +24,63 @@ class SequentialModel(nn.Module):
     Base class for distance models
     """
 
-    def __init__(self, model_type: str, dataset_name: str,
+    def __init__(self,
+                 model_type: str,
+                 dataset_name: str,
                  num_pitches=None,
                  timesteps=16,
-                 **kwargs):
+                 non_linearity=None,
+                 **kwargs
+                 ):
+        """
+
+        :param model_type:
+        :type model_type:
+        :param dataset_name:
+        :type dataset_name:
+        :param num_pitches:
+        :type num_pitches:
+        :param timesteps:
+        :type timesteps:
+        :param non_linearity:
+        :type non_linearity:
+        :param kwargs: must only include parameters used in filepath string
+        :type kwargs:
+        """
         super(SequentialModel, self).__init__()
         self.num_pitches = num_pitches
         self.timesteps = timesteps
         self.num_voices = 1
-        self.kwargs = kwargs
+
         self.model_type = model_type
 
         # load or create dataset
         assert os.path.exists(dataset_name)
         self.dataset_filepath = dataset_name
 
-        # self.dataset = pickle.load(open(self.dataset_filepath, 'rb'))
-        # self.metadatas = self.dataset[-1]
+        # load generator
         self.generator_unitary = self.generator(phase='all', batch_size=1)
 
         # unique filepath
+        kwargs.update({'non_linearity': non_linearity,
+                       })
+
         od = collections.OrderedDict(sorted(self.kwargs.items()))
         params_string = '_'.join(
             ['='.join(x) for x in zip(od.keys(), map(str, od.values()))])
 
-        self.filepath = os.path.join(PACKAGE_DIR,
-                                     f'models/{self.model_type}_'
+        model_dir = os.path.join(PACKAGE_DIR,
+                                 f'models',
+                                 f'{self.model_type}'
+                                 )
+        if not os.path.exists(model_dir):
+            os.mkdir(model_dir)
+        self.filepath = os.path.join(model_dir,
                                      f'{params_string}.h5'
                                      )
+
+        # common layers
+        self.non_linearity = non_linearity_from_name(non_linearity)
 
     def __str__(self):
         return self.filepath
@@ -471,28 +501,40 @@ class SequentialModel(nn.Module):
         sns.plt.show()  # TODO  clean refactor
 
 
+def non_linearity_from_name(non_linearity):
+    if not non_linearity:
+        return lambda x: x
+    else:
+        if non_linearity == 'ReLU':
+            return nn.ReLU()
+        else:
+            raise NotImplementedError
+
+
 class Distance(SequentialModel):
     def __init__(self,
                  dataset_name,
                  timesteps,
-                 num_units_lstm=256,
+                 num_lstm_units=256,
                  num_pitches=None,
                  dropout_prob=0.2,
+                 input_dropout=0.1,
                  num_layers=1,
                  embedding_dim=16,
-                 add_relu=True,
-                 model_type='distance',
-                 **kwargs):
-        if add_relu:
-            model_type += '_relu'
+                 non_linearity=None,
+                 ):
+        model_type = 'distance'
         super(Distance, self).__init__(model_type,
                                        dataset_name,
                                        num_pitches,
                                        timesteps,
-                                       **kwargs)
-        self.add_relu = add_relu
+                                       non_linearity,
+                                       dropout_prob=dropout_prob,
+                                       input_dropout=input_dropout,
+                                       num_lstm_units=num_lstm_units
+                                       )
         self.embedding_dim = embedding_dim
-        self.num_lstm_units = num_units_lstm
+        self.num_lstm_units = num_lstm_units
         self.num_layers = num_layers
 
         # Parameters
@@ -503,7 +545,6 @@ class Distance(SequentialModel):
                               num_layers=self.num_layers,
                               dropout=dropout_prob)
 
-        # TODO add repr_size
         self.lstm_d = nn.LSTM(
             input_size=self.num_lstm_units + 1,
             hidden_size=self.num_lstm_units,
@@ -512,7 +553,6 @@ class Distance(SequentialModel):
 
         self.linear_out = nn.Linear(in_features=self.num_lstm_units,
                                     out_features=num_pitches)
-        self.relu = nn.ReLU()
 
     def forward(self, inputs, first_note):
         # only first input is used!
@@ -547,8 +587,8 @@ class Distance(SequentialModel):
         outputs_lstm, _ = self.lstm_e(embedding_time_major, hidden)
         last_output = outputs_lstm[-1]
 
-        if self.add_relu:
-            last_output = self.relu(last_output)
+        # ReLU or nothing
+        last_output = self.non_linearity(last_output)
 
         return last_output
 
@@ -589,8 +629,20 @@ class Distance(SequentialModel):
         weights = weights.view(self.timesteps, batch_size, self.num_pitches)
         return weights, softmax
 
-    # TODO cannot change generator output because we need a method
-    # output_gen -> forward variable input
+    def loss_function(self, next_element):
+        # to cuda
+        next_element_cuda = [
+            Variable(tensor.cuda())
+            for tensor in next_element
+        ]
+        input, output = next_element_cuda
+        weights, softmax = self.forward(input)
+
+        # mce_loss
+        mce_loss = crossentropy_loss(weights, output)
+        return mce_loss
+
+
     def generator(self, batch_size, phase, percentage_train=0.8, **kwargs):
         """
 
@@ -599,8 +651,6 @@ class Distance(SequentialModel):
         :param percentage_train:
         :return:
         """
-        # TODO effective timesteps?
-
         X, voice_ids, index2notes, note2indexes, metadatas = pickle.load(
             open(self.dataset_filepath, 'rb'))
 
@@ -621,62 +671,41 @@ class Distance(SequentialModel):
         else:
             NotImplementedError
 
-        first_notes = []
-        sequences = [[] for _ in range(3)]
-
         batch = 0
+        chunks = []
 
         while True:
             chorale_index = np.random.choice(chorale_indices)
             chorales = X[chorale_index]
-            if len(chorales) < 3:
-                continue
-            transposition_indexes = np.random.choice(len(chorales),
-                                                     replace=False, size=3)
+
+            transposition_index = np.random.randint(len(chorales))
 
             # there's padding of size timesteps before and after
             chorale_length = len(
                 chorales[0][0][SOP_INDEX]) + 2 * self.timesteps
             time_index = np.random.randint(0,
                                            chorale_length - self.timesteps)
-            for seq_index, seq_list in enumerate(sequences):
-                transposition_index = transposition_indexes[seq_index]
-                indexed_chorale, _, offset = np.array(
-                    chorales[transposition_index])
-                # padding of size timesteps
-                chunk = self.numpy_indexed2chunk(indexed_chorale,
-                                                 start_symbols,
-                                                 end_symbols,
-                                                 time_index)
-                seq_list.append(chunk)
 
-            # find first note symbol of output seq (last sequence in sequences)
-            first_note_index_output_seq = \
-                first_note_index(chunk,
-                                 time_index_start=0,
-                                 time_index_end=self.timesteps,
-                                 note2index=note2indexes[SOP_INDEX])
-            first_notes.append(first_note_index_output_seq)
+            indexed_chorale, _, offset = np.array(
+                chorales[transposition_index])
+            # padding of size timesteps
+            chunk = self.numpy_indexed2chunk(indexed_chorale,
+                                             start_symbols,
+                                             end_symbols,
+                                             time_index)
+            chunks.append(chunk)
 
             batch += 1
             # if there is a full batch
             if batch == batch_size:
-                torch_sequences = [torch.from_numpy(np.array(chunk))
-                                   for chunk in sequences]
-                torch_first_notes = torch.from_numpy(np.array(first_notes,
-                                                              dtype=np.long))
+                torch_sequences = torch.from_numpy(np.array(chunks))
 
-                # input_1, input_2, first_note, output
-                next_element = (torch_sequences[0],
-                                torch_sequences[0],
-                                torch_first_notes,
-                                torch_sequences[0],
+                next_element = (torch_sequences,
+                                torch_sequences
                                 )
                 yield next_element
-
                 batch = 0
-                first_notes = []
-                sequences = [[] for _ in range(3)]
+                chunks = []
 
 
 class InvariantDistance(SequentialModel):
