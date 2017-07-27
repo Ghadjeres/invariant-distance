@@ -13,7 +13,8 @@ from deepPermutations.data_utils import PACKAGE_DIR, \
 from deepPermutations.data_utils import START_SYMBOL, END_SYMBOL, \
     first_note_index
 from deepPermutations.losses import crossentropy_loss, accuracy
-from deepPermutations.permutation_distance import spearman_rho
+from deepPermutations.permutation_distance import spearman_rho, \
+    distance_from_name
 from torch import nn
 from torch.autograd import Variable
 from tqdm import tqdm
@@ -104,6 +105,12 @@ class SequentialModel(nn.Module):
              torch.ones(seq_length - 1, batch_size, 1)), 2).cuda(),
                            volatile=volatile)
         return no_data
+
+    def target_seq(self):
+        X, voice_ids, index2notes, note2indexes, metadatas = pickle.load(
+            open(self.dataset_filepath, 'rb'))
+        return torch.from_numpy(
+            np.array(X[10][2][0][SOP_INDEX][96:96 + self.timesteps])).long()
 
     def generator_dataset(self, phase, percentage_train=0.8,
                           **kwargs):
@@ -268,9 +275,18 @@ class SequentialModel(nn.Module):
             score_nearest.show()
         return nearest_chorales
 
-    def find_nearests_all(self, target_seq, num_nearests=20,
-                          show_results=False):
+    def find_nearests_all(self,
+                          target_seq,
+                          num_nearests=20,
+                          show_results=False,
+                          distance='spearman'):
         """
+        :param distance:
+        :type distance:
+        :param show_results:
+        :type show_results:
+        :param num_nearests:
+        :type num_nearests:
         :param target_seq: 1D torch.LongTensor
         :type target_seq:
 
@@ -293,25 +309,34 @@ class SequentialModel(nn.Module):
         hidden_repr = self.hidden_repr(target_chorale_cuda)
         intermediate_results = []
         for id, chunk in tqdm(enumerate(generator_dataset)):
-            # to cuda Variable
-            input_cuda = Variable(chunk.cuda())[None, :]
 
-            hidden_repr_gen = self.hidden_repr(input_cuda)
+            if distance == 'edit':
+                dist = distance_from_name(distance)(
+                    target_chorale.numpy()[SOP_INDEX],
+                    variable2numpy(chunk)[SOP_INDEX]
+                )
+            else:
+                # to cuda Variable
+                input_cuda = Variable(chunk.cuda())[None, :]
 
-            dist = spearman_rho(variable2numpy(hidden_repr[0]),
-                                variable2numpy(hidden_repr_gen[0]))
+                hidden_repr_gen = self.hidden_repr(input_cuda)
 
-            chorale = variable2numpy(input_cuda)
+                dist = distance_from_name(distance)(
+                    variable2numpy(hidden_repr[0]),
+                    variable2numpy(hidden_repr_gen[0])
+                )
 
-            heapq.heappush(intermediate_results,
-                           (dist, id, chorale)
-                           )
+                chorale = variable2numpy(input_cuda)
+
+                heapq.heappush(intermediate_results,
+                               (dist, id, chorale)
+                               )
 
             if len(intermediate_results) > 512:
                 intermediate_results = intermediate_results[:512]
                 heapq.heapify(intermediate_results)
 
-            if id > 100000:
+            if id > 200000:
                 break
 
         if show_results:
@@ -319,12 +344,13 @@ class SequentialModel(nn.Module):
                 chorale
                 for dist, id, chorale in heapq.nsmallest(num_nearests,
                                                          intermediate_results,
-                                                         key=lambda e: e[0])]
-            #
-            # for dist, chorale in heapq.nsmallest(20,
-            #                                      intermediate_results,
-            #                                      key=lambda e: e[0]):
-            #     print(dist)
+                                                         key=lambda e: e[0])
+            ]
+
+            for dist, id, chorale in heapq.nsmallest(num_nearests,
+                                                     intermediate_results,
+                                                     key=lambda e: e[0]):
+                print(dist)
 
             # concat all results
             nearest_chorale = np.concatenate(
