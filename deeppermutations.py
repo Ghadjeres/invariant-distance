@@ -115,6 +115,7 @@ if __name__ == '__main__':
         dropout_prob=0.3,
         num_layers=2,
         num_units_lstm=num_units_lstm,
+        input_dropout=0.3,
     )
 
     # invariant_distance = InvariantDistance(
@@ -162,10 +163,16 @@ if __name__ == '__main__':
                                   reg_norm=None
                                   )
 
+    invariant_distance.find_nearests_all(
+        target_seq=None,
+        show_results=True
+    )
+    exit()
+
     invariant_distance.find_nearests(
         target_seq=None,
         show_results=True,
-        num_elements=30000)
+        num_elements=20000)
     # todo show pred
     # invariant_distance_model.test_transpose_out_of_bounds(
     #     effective_timestep=32)

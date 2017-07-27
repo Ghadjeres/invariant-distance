@@ -115,17 +115,24 @@ class SequentialModel(nn.Module):
         for chorale_index in chorale_indices:
             chorales = X[chorale_index]
             for chorale in chorales:
+                indexed_chorale, _, offset = np.array(
+                    chorale)
+
                 # there's padding of size timesteps before and after
                 chorale_length = len(
-                    chorales[0][0][SOP_INDEX]) + 2 * self.timesteps
+                    indexed_chorale[SOP_INDEX]) + 2 * self.timesteps
+
+                padding_dimensions = (self.timesteps,)
+
+                indexed_chorale = np.concatenate(
+                    (np.full(padding_dimensions, start_symbols),
+                     indexed_chorale[SOP_INDEX],
+                     np.full(padding_dimensions, end_symbols)),
+                    axis=0).astype(np.long)
+
                 for time_index in range(chorale_length - self.timesteps):
-                    indexed_chorale, _, offset = np.array(
-                        chorale)
-                    # padding of size timesteps
-                    chunk = self.numpy_indexed2chunk(indexed_chorale,
-                                                     start_symbols,
-                                                     end_symbols,
-                                                     time_index)
+                    chunk = indexed_chorale[
+                            time_index: time_index + self.timesteps]
 
                     torch_chunk = torch.from_numpy(np.array(chunk))
                     yield torch_chunk
@@ -182,7 +189,7 @@ class SequentialModel(nn.Module):
         hidden_repr = self.hidden_repr(target_chorale_cuda)
         intermediate_results = []
         for id, next_element in tqdm(enumerate(islice(generator_unitary,
-                                                  num_elements))):
+                                                      num_elements))):
             # to cuda Variable
             next_element_cuda = [
                 Variable(tensor.cuda())
@@ -214,8 +221,8 @@ class SequentialModel(nn.Module):
             nearest_chorales = [
                 chorale
                 for dist, id, chorale in heapq.nsmallest(20,
-                                                     intermediate_results,
-                                                     key=lambda e: e[0])]
+                                                         intermediate_results,
+                                                         key=lambda e: e[0])]
             #
             # for dist, chorale in heapq.nsmallest(20,
             #                                      intermediate_results,
@@ -262,7 +269,7 @@ class SequentialModel(nn.Module):
 
         hidden_repr = self.hidden_repr(target_chorale_cuda)
         intermediate_results = []
-        for id, chunk in enumerate(generator_dataset):
+        for id, chunk in tqdm(enumerate(generator_dataset)):
             # to cuda Variable
             input_cuda = Variable(chunk.cuda())[None, :]
 
@@ -280,6 +287,9 @@ class SequentialModel(nn.Module):
             if len(intermediate_results) > 512:
                 intermediate_results = intermediate_results[:512]
                 heapq.heapify(intermediate_results)
+
+            if id > 100000:
+                break
 
         if show_results:
             nearest_chorales = [
@@ -680,16 +690,19 @@ class InvariantDistance(SequentialModel):
                  embedding_dim=16,
                  non_linearity=None,
                  model_type='invariant_distance',
+                 input_dropout=0,
                  **kwargs):
         super(InvariantDistance, self).__init__(model_type,
                                                 dataset_name,
                                                 num_pitches,
                                                 timesteps,
+                                                input_dropout=input_dropout,
                                                 **kwargs)
         self.non_linearity = non_linearity
         self.embedding_dim = embedding_dim
         self.num_lstm_units = num_units_lstm
         self.num_layers = num_layers
+        self.input_dropout = input_dropout
 
         # Parameters
         self.embedding = nn.Embedding(num_embeddings=num_pitches,
@@ -708,6 +721,8 @@ class InvariantDistance(SequentialModel):
 
         self.linear_out = nn.Linear(in_features=self.num_lstm_units,
                                     out_features=num_pitches)
+
+        self.input_dropout = nn.Dropout(input_dropout)
 
     def forward(self, inputs, first_note):
         # todo add hidden to inputs?
@@ -736,7 +751,7 @@ class InvariantDistance(SequentialModel):
         :return: (batch_size, hidden_repr_dim)
         :rtype:
         """
-        # todo check dimensions
+        # todo input_dropout?
         batch_size, _ = input.size()
         embedding = self.embedding(input)
         embedding_time_major = torch.transpose(
@@ -914,16 +929,13 @@ class InvariantDistanceRelu(InvariantDistance):
                                       out_features=mlp_hidden_size)
         self.linear_2_mlp = nn.Linear(in_features=mlp_hidden_size,
                                       out_features=self.num_lstm_units)
-        # self.prelu = nn.PReLU()
-        self.prelu = nn.ReLU()
+
+        self.relu = nn.ReLU()
 
     def hidden_repr(self, input):
         hidden_no_relu = super(InvariantDistanceRelu, self).hidden_repr(
             input=input)
-        # return self.prelu(self.linear_1_mlp(hidden_no_relu))
-        return self.prelu(hidden_no_relu)
-        # return hidden_no_relu
-        # return F.elu(self.linear_1_mlp(hidden_no_relu))
+        return self.relu(hidden_no_relu)
 
     def forward(self, inputs, first_note):
         # todo add hidden to inputs?
