@@ -9,7 +9,7 @@ import torch
 import torch.nn.functional as F
 from deepPermutations.data_preprocessing import SOP_INDEX, indexed_seq_to_score
 from deepPermutations.data_utils import PACKAGE_DIR, \
-    variable2numpy, SEQ, numpy2variable
+    variable2numpy, SEQ, numpy2variable, first_note_index
 from deepPermutations.data_utils import START_SYMBOL, END_SYMBOL
 from deepPermutations.losses import crossentropy_loss, accuracy
 from deepPermutations.permutation_distance import spearman_rho, \
@@ -76,7 +76,8 @@ class SequentialModel(nn.Module):
                                      )
         self.results_dir = os.path.join(PACKAGE_DIR,
                                         f'results',
-                                        f'{self.model_type}'
+                                        f'{self.model_type}',
+                                        f'{self.params_string}'
                                         )
         if not os.path.exists(self.results_dir):
             os.mkdir(self.results_dir)
@@ -525,8 +526,7 @@ class SequentialModel(nn.Module):
 
         # save into file
         with open(os.path.join(self.results_dir,
-                               f'stats_{permutation_distance}_'
-                               f'{self.params_string}.csv'), 'w') as f:
+                               f'stats_{permutation_distance}.csv'), 'w') as f:
             f.write(f'distance, label\n')
             for i, label in enumerate(['random', 'transposition']):
                 for d in hist_data[i]:
@@ -968,13 +968,13 @@ class InvariantDistance(SequentialModel):
                 seq_list.append(chunk)
 
             # find first note symbol of output seq (last sequence in sequences)
-            first_note_index = first_note_index(chunk,
-                                                time_index_start=0,
-                                                time_index_end=self.timesteps,
-                                                note2index=
-                                                note2indexes[
-                                                    SOP_INDEX])
-            first_notes.append(first_note_index)
+            first_note = first_note_index(chunk,
+                                          time_index_start=0,
+                                          time_index_end=self.timesteps,
+                                          note2index=
+                                          note2indexes[
+                                              SOP_INDEX])
+            first_notes.append(first_note)
 
             batch += 1
             # if there is a full batch

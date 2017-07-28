@@ -1,7 +1,6 @@
 from itertools import islice
 
 import torch
-from deepPermutations.losses import crossentropy_loss, accuracy
 from deepPermutations.sequential_model import SequentialModel
 from torch.autograd import Variable
 from tqdm import tqdm
@@ -60,7 +59,7 @@ class ModelManager:
         self.model.save()
 
     def loss_and_acc_on_epoch(self, batches_per_epoch, generator,
-                              train=True, reg_norm=0):
+                              train=True):
 
         mean_mce_loss = 0
         mean_accuracy = 0
@@ -71,25 +70,23 @@ class ModelManager:
             self.model.eval()
         for sample_id, next_element in tqdm(
                 enumerate(islice(generator, batches_per_epoch))):
-            mce_loss, grad_reg, acc = self.loss_and_acc(
+            mce_loss, reg, acc = self.loss_and_acc(
                 next_element,
-                reg_norm,
                 train=train)
 
             mean_mce_loss += mce_loss
-            mean_reg += grad_reg
+            mean_reg += reg
             mean_accuracy += acc
 
         return (mean_mce_loss / batches_per_epoch,
                 mean_reg / batches_per_epoch,
                 mean_accuracy / batches_per_epoch)
 
-    def loss_and_acc(self, next_element, reg_norm, train):
+    def loss_and_acc(self, next_element, train):
 
         self.optimizer.zero_grad()
 
-        mce_loss, reg, acc = self.model.loss_functions(next_element,
-                                                       reg_norm)
+        mce_loss, reg, acc = self.model.loss_functions(next_element)
         loss = mce_loss + self.lambda_reg * reg
 
         # backward pass and step
@@ -123,15 +120,13 @@ class ModelManager:
             res = self.loss_and_acc_on_epoch(
                 batches_per_epoch=batches_per_epoch,
                 generator=generator_train,
-                train=True,
-                reg_norm=reg_norm)
+                train=True)
 
             # eval
             res_val = self.loss_and_acc_on_epoch(
                 batches_per_epoch=batches_per_epoch // 10,
                 generator=generator_val,
-                train=False,
-                reg_norm=reg_norm)
+                train=False)
 
             # plot
             if plot:

@@ -20,7 +20,7 @@ def get_arguments():
                         help=f'number of batches per epoch (default: %('
                              f'default)s)',
                         type=int, default=100)
-    parser.add_argument('-l', '--num_layers',
+    parser.add_argument('-L', '--num_layers',
                         help=f'number of LSTM layers (default: %('
                              f'default)s)',
                         type=int, default=2)
@@ -59,7 +59,7 @@ def get_arguments():
                         help=f'compute stats on N randomly drawn sequences',
                         default=0, const=10000, type=int
                         )
-    parser.add_argument('-f', '--find-nearest', nargs='?',
+    parser.add_argument('-f', '--find_nearest', nargs='?',
                         help=f'find nearest neighbors',
                         default=0, const=10000, type=int
                         )
@@ -68,6 +68,16 @@ def get_arguments():
                         choices=['spearman', 'kendall', 'edit'],
                         default='spearman', type=str
                         )
+    parser.add_argument('-l', '--l_truncation', nargs='?',
+                        help=f'l truncation parameter',
+                        default=None, const=128
+                        )
+    parser.add_argument('--norm', nargs='?',
+                        help=f'regularization norm',
+                        default=None, const='l1',
+                        choices=['l1', 'l2']
+                        )
+
     args = parser.parse_args()
     print(args)
     return args
@@ -93,14 +103,20 @@ if __name__ == '__main__':
     input_dropout = args.input_dropout
     dropout_prob = args.dropout_lstm
     num_layers = args.num_layers
+    reg_norm = args.norm
 
     # dataset parameters
     num_pitches = 55
 
+    # permutation distance parameters
+    permutation_distance = args.permutation_distance
+    l_truncation = args.l_truncation
+
     # visualizations
     compute_stats = args.stats > 0
     num_elements_stats = args.stats
-    permutation_distance = args.permutation_distance
+    compute_nearests = args.find_nearest > 0
+    num_elements_nearest = args.find_nearest
 
     # create dataset if doesn't exist
     dataset_name = 'transpose/bach_sop'
@@ -125,7 +141,8 @@ if __name__ == '__main__':
             input_dropout=input_dropout,
             num_layers=num_layers,
             embedding_dim=16,
-            non_linearity=non_linearity
+            non_linearity=non_linearity,
+            reg_norm=reg_norm
         )
     else:
         distance = Distance(
@@ -142,7 +159,7 @@ if __name__ == '__main__':
 
     model_manager = ModelManager(model=distance,
                                  lr=1e-3,
-                                 lambda_reg=1.
+                                 lambda_reg=1.e-2
                                  )
     model_manager.load()
     if train:
@@ -150,32 +167,27 @@ if __name__ == '__main__':
                                   num_epochs=num_epochs,
                                   batches_per_epoch=batches_per_epoch,
                                   plot=True,
-                                  save_every=2,
-                                  reg_norm=None
+                                  save_every=2
                                   )
 
     if compute_stats:
         distance.compute_stats(
             num_elements=num_elements_stats,
             permutation_distance=permutation_distance,
+            l_truncation=l_truncation,
             plot=True)
 
+    if compute_nearests:
+        target_seq = distance.target_seq()
+        distance.find_nearests_all(
+            target_seq=target_seq,
+            show_results=True,
+            num_nearests=num_elements_nearest,
+            permutation_distance=permutation_distance,
+            l_truncation=l_truncation
+        )
     exit()
-    target_seq = distance.target_seq()
 
-    distance.find_nearests_all(
-        target_seq=target_seq,
-        show_results=True,
-        num_nearests=50,
-        permutation_distance=permutation_distance
-    )
-    exit()
-
-    distance.find_nearests(
-        target_seq=None,
-        show_results=True,
-        num_elements=20000)
-    # todo show pred
     # invariant_distance_model.test_transpose_out_of_bounds(
     #     effective_timestep=32)
 
