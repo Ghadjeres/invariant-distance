@@ -353,34 +353,43 @@ class SequentialModel(nn.Module):
             if id > 100000:
                 break
 
-        if show_results:
-            nearest_chorales = [
-                chorale
-                for dist, id, chorale in heapq.nsmallest(num_nearests,
-                                                         intermediate_results,
-                                                         key=lambda e: e[0])
-            ]
 
+        nearest_chorales = [
+            chorale
             for dist, id, chorale in heapq.nsmallest(num_nearests,
                                                      intermediate_results,
-                                                     key=lambda e: e[0]):
-                print(dist)
+                                                     key=lambda e: e[0])
+        ]
 
-            # concat all results
-            nearest_chorale = np.concatenate(
-                [target_chorale[SOP_INDEX].numpy()] +
-                [np.array(
-                    nearest_chorale[SOP_INDEX])
-                    for nearest_chorale in
-                    nearest_chorales],
-                axis=0)
+        # for dist, id, chorale in heapq.nsmallest(num_nearests,
+        #                                          intermediate_results,
+        #                                          key=lambda e: e[0]):
+            # print(dist)
 
-            _, _, index2notes, note2indexes, _ = pickle.load(open(
-                self.dataset_filepath, 'rb'))
-            score_nearest = indexed_seq_to_score(nearest_chorale,
-                                                 index2notes[SOP_INDEX],
-                                                 note2indexes[SOP_INDEX])
+        # concat all results
+        nearest_chorale = np.concatenate(
+            [target_chorale[SOP_INDEX].numpy()] +
+            [np.array(
+                nearest_chorale[SOP_INDEX])
+                for nearest_chorale in
+                nearest_chorales],
+            axis=0)
+
+        _, _, index2notes, note2indexes, _ = pickle.load(open(
+            self.dataset_filepath, 'rb'))
+        score_nearest = indexed_seq_to_score(nearest_chorale,
+                                             index2notes[SOP_INDEX],
+                                             note2indexes[SOP_INDEX])
+        xml_filepath = os.path.join(self.results_dir,
+                                    f'nearest_'
+                                    f'{permutation_distance}_'
+                                    f'l{l_truncation}.xml'
+                                    )
+        score_nearest.write('xml', xml_filepath)
+
+        if show_results:
             score_nearest.show()
+
         return nearest_chorales
 
     def show_mean_distance_matrix(self, chorale_index=0,
@@ -526,7 +535,10 @@ class SequentialModel(nn.Module):
 
         # save into file
         with open(os.path.join(self.results_dir,
-                               f'stats_{permutation_distance}.csv'), 'w') as f:
+                               f'stats_'
+                               f'{permutation_distance}_'
+                               f'l{l_truncation}.csv'),
+                  'w') as f:
             f.write(f'distance, label\n')
             for i, label in enumerate(['random', 'transposition']):
                 for d in hist_data[i]:
