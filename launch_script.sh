@@ -11,15 +11,28 @@
 #                           [--norm [{l1,l2}]]
 
 export PYTHONPATH=~/Projets/Python/workspace/DeepBach:$PYTHONPATH
-#python deeppermutations.py -b 256 -i -d 0.3 -D 0.5 -t 500
-#python deeppermutations.py -b 256 -i -r -d 0.3 -D 0.5 -t 500
 
-python deeppermutations.py -b 256 -i -r --norm l2 -d 0.3 -D 0.5 -t 100
-python deeppermutations.py -b 256 -i -r --norm l2 -d 0.3 -D 0.5 -s -p spearman
-python deeppermutations.py -b 256 -i -r --norm l2 -d 0.3 -D 0.5 -s -p kendall
+
+#python deeppermutations.py -b 256 -i -r --norm l2 -d 0.3 -D 0.5 -t 100
+#python deeppermutations.py -b 256 -i -r --norm l2 -d 0.3 -D 0.5 -s -p spearman
+#python deeppermutations.py -b 256 -i -r --norm l2 -d 0.3 -D 0.5 -s -p kendall
 
 # plot stats
-#python deeppermutations.py -b 256 -i -d 0.3 -D 0.5 -s -p spearman
-#python deeppermutations.py -b 256 -i -d 0.3 -D 0.5 -s -p kendall
+
 #python deeppermutations.py -b 256 -i -r -d 0.3 -D 0.5 -s -p spearman
 #python deeppermutations.py -b 256 -i -r -d 0.3 -D 0.5 -s -p kendall
+
+
+python deeppermutations.py -b 256 -i -r --norm l1 -d 0.3 -D 0.5 -t 500 -c
+
+python deeppermutations.py -b 256 -i -r --norm l1 -d 0.3 -D 0.5 -s -p spearman
+python deeppermutations.py -b 256 -i -r --norm l1 -d 0.3 -D 0.5 -s -p kendall
+
+python deeppermutations.py -b 256  -d 0.3 -D 0.5 -t 500 -c
+python deeppermutations.py -b 256  -d 0.3 -D 0.5 -s -p spearman
+python deeppermutations.py -b 256  -d 0.3 -D 0.5 -s -p kendall
+
+
+python deeppermutations.py -b 256  -r -d 0.3 -D 0.5 -t 500 -c
+python deeppermutations.py -b 256  -r -d 0.3 -D 0.5 -s -p spearman
+python deeppermutations.py -b 256  -r -d 0.3 -D 0.5 -s -p kendall
