@@ -10,11 +10,11 @@ import torch.nn.functional as F
 from deepPermutations.data_preprocessing import SOP_INDEX, indexed_seq_to_score
 from deepPermutations.data_utils import PACKAGE_DIR, \
     variable2numpy, SEQ, numpy2variable
-from deepPermutations.data_utils import START_SYMBOL, END_SYMBOL, \
-    first_note_index
+from deepPermutations.data_utils import START_SYMBOL, END_SYMBOL
 from deepPermutations.losses import crossentropy_loss, accuracy
 from deepPermutations.permutation_distance import spearman_rho, \
     distance_from_name
+from deepPermutations.regularization_norms import regularization_norm_from_name
 from torch import nn
 from torch.autograd import Variable
 from tqdm import tqdm
@@ -766,6 +766,7 @@ class InvariantDistance(SequentialModel):
                  embedding_dim=16,
                  non_linearity=None,
                  input_dropout=0,
+                 reg_norm=None,
                  **kwargs):
         model_type = 'invariant_distance'
         super(InvariantDistance, self).__init__(model_type,
@@ -777,7 +778,8 @@ class InvariantDistance(SequentialModel):
                                                 dropout_prob=dropout_prob,
                                                 num_lstm_units=num_lstm_units,
                                                 num_layers=num_layers,
-                                                embedding_dim=embedding_dim
+                                                embedding_dim=embedding_dim,
+                                                reg_norm=reg_norm,
                                                 )
         self.embedding_dim = embedding_dim
         self.num_lstm_units = num_lstm_units
@@ -800,6 +802,7 @@ class InvariantDistance(SequentialModel):
         self.linear_out = nn.Linear(in_features=self.num_lstm_units,
                                     out_features=num_pitches)
 
+        self.reg_norm = regularization_norm_from_name(reg_norm)
         self.non_linearity = non_linearity_from_name(non_linearity)
         self.input_dropout_layer = nn.Dropout2d(input_dropout)
 
@@ -887,7 +890,7 @@ class InvariantDistance(SequentialModel):
         weights = weights.view(self.timesteps, batch_size, self.num_pitches)
         return weights, softmax
 
-    def loss_functions(self, next_element, reg_norm, **kwargs):
+    def loss_functions(self, next_element, **kwargs):
         # to cuda
         next_element_cuda = [
             Variable(tensor.cuda())
@@ -901,17 +904,7 @@ class InvariantDistance(SequentialModel):
 
         # mce_loss
         mce_loss = crossentropy_loss(weights, output)
-
-        # regularization
-        if reg_norm is not None:
-            if reg_norm == 'l1':
-                reg = torch.abs(diff).sum(1).mean()
-            elif reg_norm == 'l2':
-                reg = torch.norm(diff, p=2, dim=1).mean()
-            else:
-                NotImplementedError
-        else:
-            reg = Variable(torch.zeros(1).cuda())
+        reg = self.reg_norm(diff)
 
         # accuracy
         acc = accuracy(weights, output)
@@ -975,12 +968,13 @@ class InvariantDistance(SequentialModel):
                 seq_list.append(chunk)
 
             # find first note symbol of output seq (last sequence in sequences)
-            first_note_index_output_seq = \
-                first_note_index(chunk,
-                                 time_index_start=0,
-                                 time_index_end=self.timesteps,
-                                 note2index=note2indexes[SOP_INDEX])
-            first_notes.append(first_note_index_output_seq)
+            first_note_index = first_note_index(chunk,
+                                                time_index_start=0,
+                                                time_index_end=self.timesteps,
+                                                note2index=
+                                                note2indexes[
+                                                    SOP_INDEX])
+            first_notes.append(first_note_index)
 
             batch += 1
             # if there is a full batch
