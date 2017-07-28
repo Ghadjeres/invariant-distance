@@ -62,18 +62,24 @@ class SequentialModel(nn.Module):
         self.generator_unitary = self.generator(phase='all', batch_size=1)
 
         od = collections.OrderedDict(sorted(kwargs.items()))
-        params_string = '_'.join(
+        self.params_string = '_'.join(
             ['='.join(x) for x in zip(od.keys(), map(str, od.values()))])
 
-        model_dir = os.path.join(PACKAGE_DIR,
-                                 f'models',
-                                 f'{self.model_type}'
-                                 )
-        if not os.path.exists(model_dir):
-            os.mkdir(model_dir)
-        self.filepath = os.path.join(model_dir,
-                                     f'{params_string}.h5'
+        self.model_dir = os.path.join(PACKAGE_DIR,
+                                      f'models',
+                                      f'{self.model_type}'
+                                      )
+        if not os.path.exists(self.model_dir):
+            os.mkdir(self.model_dir)
+        self.filepath = os.path.join(self.model_dir,
+                                     f'{self.params_string}.h5'
                                      )
+        self.results_dir = os.path.join(PACKAGE_DIR,
+                                        f'results',
+                                        f'{self.model_type}'
+                                        )
+        if not os.path.exists(self.results_dir):
+            os.mkdir(self.results_dir)
 
     def __str__(self):
         return self.filepath
@@ -278,10 +284,10 @@ class SequentialModel(nn.Module):
                           target_seq,
                           num_nearests=20,
                           show_results=False,
-                          distance='spearman'):
+                          permutation_distance='spearman'):
         """
-        :param distance:
-        :type distance:
+        :param permutation_distance:
+        :type permutation_distance:
         :param show_results:
         :type show_results:
         :param num_nearests:
@@ -309,10 +315,10 @@ class SequentialModel(nn.Module):
         intermediate_results = []
         for id, chunk in tqdm(enumerate(generator_dataset)):
 
-            if distance == 'edit':
+            if permutation_distance == 'edit':
                 chunk = Variable(chunk, volatile=True)
                 chorale = variable2numpy(chunk)
-                dist = distance_from_name(distance)(
+                dist = distance_from_name(permutation_distance)(
                     target_chorale.numpy()[SOP_INDEX],
                     chorale
                 )
@@ -323,7 +329,7 @@ class SequentialModel(nn.Module):
 
                 hidden_repr_gen = self.hidden_repr(input_cuda)
 
-                dist = distance_from_name(distance)(
+                dist = distance_from_name(permutation_distance)(
                     variable2numpy(hidden_repr[0]),
                     variable2numpy(hidden_repr_gen[0])
                 )
@@ -436,10 +442,10 @@ class SequentialModel(nn.Module):
             print(std)
 
     def compute_stats(self,
-                      chorale_index=0,
                       num_elements=1000,
-                      timesteps=32,
-                      export_filename='results/stats.csv'):
+                      permutation_distance='spearman',
+                      plot=False
+                      ):
         """
 
         :param num_elements:
@@ -453,13 +459,12 @@ class SequentialModel(nn.Module):
          metadatas) = pickle.load(open(self.dataset_filepath, 'rb'))
 
         # input:
-        chorale_transpositions = X[chorale_index]
-        # sequence_length = len(chorale_transpositions[0][SEQ][SOP_INDEX])
         generator_unitary = self.generator_unitary
 
         distance_diff = []
         distance_same = []
 
+        custom_distance = distance_from_name(permutation_distance)
         for _ in tqdm(range(num_elements)):
             # different sequences:
             hidden_repr_1 = self.hidden_repr(
@@ -474,15 +479,20 @@ class SequentialModel(nn.Module):
             hidden_repr_1 = variable2numpy(hidden_repr_1)
             hidden_repr_2 = variable2numpy(hidden_repr_2)
 
-            distance_diff.append(spearman_rho(hidden_repr_1, hidden_repr_2))
+            dist = custom_distance(
+                hidden_repr_1, hidden_repr_2
+            )
+            distance_diff.append(dist)
 
             # same sequence up to transposition
             chorale_transpositions = np.random.choice(X)
 
             chorale_length = len(chorale_transpositions[0][SEQ][SOP_INDEX])
-            time_index = np.random.choice(chorale_length - timesteps)
+            time_index = np.random.choice(chorale_length - self.timesteps)
             transposition_index_1, transposition_index_2 = np.random.choice(
-                len(chorale_transpositions), size=2)
+                len(chorale_transpositions),
+                size=2,
+                replace=False)
             transposition_1 = chorale_transpositions[transposition_index_1]
             transposition_2 = chorale_transpositions[transposition_index_2]
 
@@ -502,25 +512,27 @@ class SequentialModel(nn.Module):
             hidden_repr_1 = variable2numpy(hidden_repr_1)
             hidden_repr_2 = variable2numpy(hidden_repr_2)
 
-            distance_same.append(spearman_rho(hidden_repr_1, hidden_repr_2))
+            dist = custom_distance(hidden_repr_1, hidden_repr_2)
+            distance_same.append(dist)
 
         hist_data = [distance_diff, distance_same]
 
         # save into file
-        with open(os.path.join(PACKAGE_DIR,
-                               export_filename), 'w') as f:
+        with open(os.path.join(self.results_dir,
+                               f'stats_{permutation_distance}_'
+                               f'{self.params_string}.csv'), 'w') as f:
             f.write(f'distance, label\n')
             for i, label in enumerate(['random', 'transposition']):
                 for d in hist_data[i]:
                     f.write(f'{d}, {label}\n')
-
-        import seaborn as sns
-        from matplotlib import pyplot as plt
-        sns.set()
-        fig, ax = plt.subplots()
-        for a in hist_data:
-            sns.distplot(a, ax=ax, kde=True)
-        sns.plt.show()  # TODO  clean refactor
+        if plot:
+            import seaborn as sns
+            from matplotlib import pyplot as plt
+            sns.set()
+            fig, ax = plt.subplots()
+            for a in hist_data:
+                sns.distplot(a, ax=ax, kde=True)
+            sns.plt.show()
 
 
 def non_linearity_from_name(non_linearity):

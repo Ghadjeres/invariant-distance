@@ -16,7 +16,7 @@ def get_arguments():
                         help=f'batch size used during training phase ('
                              f'default: %(default)s)',
                         type=int, default=128)
-    parser.add_argument('-s', '--num_batch_samples',
+    parser.add_argument('-B', '--batches_per_epoch',
                         help=f'number of batches per epoch (default: %('
                              f'default)s)',
                         type=int, default=100)
@@ -55,6 +55,19 @@ def get_arguments():
                         help=f'add ReLU on hidden representation',
                         default=None, const='ReLU'
                         )
+    parser.add_argument('-s', '--stats', nargs='?',
+                        help=f'compute stats on N randomly drawn sequences',
+                        default=0, const=10000, type=int
+                        )
+    parser.add_argument('-f', '--find-nearest', nargs='?',
+                        help=f'find nearest neighbors',
+                        default=0, const=10000, type=int
+                        )
+    parser.add_argument('-p', '--permutation_distance', nargs='?',
+                        help=f'distance used in stats or nearest neighbors',
+                        choices=['spearman', 'kendall', 'edit'],
+                        default='spearman', type=str
+                        )
     args = parser.parse_args()
     print(args)
     return args
@@ -66,7 +79,7 @@ if __name__ == '__main__':
 
     # training parameters
     batch_size = args.batch_size_train
-    batches_per_epoch = args.num_batch_samples
+    batches_per_epoch = args.batches_per_epoch
     nb_val_batch_samples = args.num_val_batch_samples
     train = args.train > 0
     num_epochs = args.train
@@ -83,6 +96,11 @@ if __name__ == '__main__':
 
     # dataset parameters
     num_pitches = 55
+
+    # visualizations
+    compute_stats = args.stats > 0
+    num_elements_stats = args.stats
+    permutation_distance = args.permutation_distance
 
     # create dataset if doesn't exist
     dataset_name = 'transpose/bach_sop'
@@ -126,7 +144,7 @@ if __name__ == '__main__':
                                  lr=1e-3,
                                  lambda_reg=1.
                                  )
-    # model_manager.load()
+    model_manager.load()
     if train:
         model_manager.train_model(batch_size=batch_size,
                                   num_epochs=num_epochs,
@@ -135,13 +153,21 @@ if __name__ == '__main__':
                                   save_every=2,
                                   reg_norm=None
                                   )
+
+    if compute_stats:
+        distance.compute_stats(
+            num_elements=num_elements_stats,
+            permutation_distance=permutation_distance,
+            plot=True)
+
+    exit()
     target_seq = distance.target_seq()
 
     distance.find_nearests_all(
         target_seq=target_seq,
         show_results=True,
         num_nearests=50,
-        distance='kendall'
+        permutation_distance=permutation_distance
     )
     exit()
 
@@ -152,7 +178,7 @@ if __name__ == '__main__':
     # todo show pred
     # invariant_distance_model.test_transpose_out_of_bounds(
     #     effective_timestep=32)
-    invariant_distance.compute_stats(chorale_index=0, num_elements=10000)
+
     invariant_distance.show_mean_distance_matrix(chorale_index=241,
                                                  show_plot=True)
     # invariant_distance_model.show_mean_distance_matrix(chorale_index=0,
