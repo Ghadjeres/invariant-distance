@@ -77,6 +77,9 @@ def get_arguments():
                         default=None, const='l1',
                         choices=['l1', 'l2']
                         )
+    parser.add_argument('-c', '--create', nargs='?',
+                        help=f'if True, create a new model',
+                        default=False, const=True)
 
     args = parser.parse_args()
     print(args)
@@ -104,6 +107,7 @@ if __name__ == '__main__':
     dropout_prob = args.dropout_lstm
     num_layers = args.num_layers
     reg_norm = args.norm
+    create = args.create
 
     # dataset parameters
     num_pitches = 55
@@ -159,9 +163,11 @@ if __name__ == '__main__':
 
     model_manager = ModelManager(model=distance,
                                  lr=1e-3,
-                                 lambda_reg=1.e-2
+                                 lambda_reg=1e-5
                                  )
-    model_manager.load()
+    if not create:
+        model_manager.load()
+
     if train:
         model_manager.train_model(batch_size=batch_size,
                                   num_epochs=num_epochs,
