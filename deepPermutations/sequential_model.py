@@ -284,7 +284,9 @@ class SequentialModel(nn.Module):
                           target_seq,
                           num_nearests=20,
                           show_results=False,
-                          permutation_distance='spearman'):
+                          permutation_distance='spearman',
+                          l_truncation=None
+                          ):
         """
         :param permutation_distance:
         :type permutation_distance:
@@ -313,12 +315,14 @@ class SequentialModel(nn.Module):
 
         hidden_repr = self.hidden_repr(target_chorale_cuda)
         intermediate_results = []
-        for id, chunk in tqdm(enumerate(generator_dataset)):
 
+        custom_distance = distance_from_name(permutation_distance,
+                                             l_truncation=l_truncation)
+        for id, chunk in tqdm(enumerate(generator_dataset)):
             if permutation_distance == 'edit':
                 chunk = Variable(chunk, volatile=True)
                 chorale = variable2numpy(chunk)
-                dist = distance_from_name(permutation_distance)(
+                dist = custom_distance(
                     target_chorale.numpy()[SOP_INDEX],
                     chorale
                 )
@@ -329,7 +333,7 @@ class SequentialModel(nn.Module):
 
                 hidden_repr_gen = self.hidden_repr(input_cuda)
 
-                dist = distance_from_name(permutation_distance)(
+                dist = custom_distance(
                     variable2numpy(hidden_repr[0]),
                     variable2numpy(hidden_repr_gen[0])
                 )
@@ -444,6 +448,7 @@ class SequentialModel(nn.Module):
     def compute_stats(self,
                       num_elements=1000,
                       permutation_distance='spearman',
+                      l_truncation=None,
                       plot=False
                       ):
         """
@@ -464,7 +469,8 @@ class SequentialModel(nn.Module):
         distance_diff = []
         distance_same = []
 
-        custom_distance = distance_from_name(permutation_distance)
+        custom_distance = distance_from_name(permutation_distance,
+                                             l_truncation)
         for _ in tqdm(range(num_elements)):
             # different sequences:
             hidden_repr_1 = self.hidden_repr(
