@@ -1,12 +1,14 @@
+import editdistance
 import numpy as np
 from scipy.stats import rankdata, kendalltau
-import editdistance
 
-def distance_from_name(distance_name: str):
+
+def distance_from_name(distance_name: str,
+                       l_truncation=None):
     if distance_name == 'spearman':
-        return spearman_rho
+        return lambda v1, v2: spearman_rho(v1, v2, l=l_truncation)
     elif distance_name == 'kendall':
-        return kendall_tau
+        return lambda v1, v2: kendall_tau(v1, v2, l=l_truncation)
     elif distance_name == 'edit':
         return edit_distance
 
@@ -16,9 +18,6 @@ def spearman_rho(v1, v2, l=None):
     assert len(v1) == len(v2)
     if l is None:
         l = len(v1)
-        l = 64
-        l = 128
-        # l = 256
 
     # apply function
     f = lambda x: x
@@ -44,9 +43,6 @@ def kendall_tau(v1, v2, l=None):
     assert len(v1) == len(v2)
     if l is None:
         l = len(v1)
-        # l = 64
-        # l = 128
-        l = 256
 
     # apply function
     f = lambda x: x
