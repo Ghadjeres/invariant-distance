@@ -114,7 +114,7 @@ if __name__ == '__main__':
 
     # permutation distance parameters
     permutation_distance = args.permutation_distance
-    l_truncation = args.l_truncation
+    l_truncation = int(args.l_truncation)
 
     # visualizations
     compute_stats = args.stats > 0
@@ -163,7 +163,7 @@ if __name__ == '__main__':
 
     model_manager = ModelManager(model=distance,
                                  lr=1e-3,
-                                 lambda_reg=1e-5
+                                 lambda_reg=1e0
                                  )
     if not create:
         model_manager.load()
@@ -181,7 +181,7 @@ if __name__ == '__main__':
             num_elements=num_elements_stats,
             permutation_distance=permutation_distance,
             l_truncation=l_truncation,
-            plot=True)
+            plot=False)
 
     if compute_nearests:
         target_seq = distance.target_seq()
