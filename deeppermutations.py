@@ -114,7 +114,10 @@ if __name__ == '__main__':
 
     # permutation distance parameters
     permutation_distance = args.permutation_distance
-    l_truncation = int(args.l_truncation)
+    l_truncation = args.l_truncation
+    if l_truncation is not None:
+        l_truncation = int(l_truncation)
+
 
     # visualizations
     compute_stats = args.stats > 0
@@ -162,8 +165,8 @@ if __name__ == '__main__':
         )
 
     model_manager = ModelManager(model=distance,
-                                 lr=1e-3,
-                                 lambda_reg=1e0
+                                 lr=1e-4,
+                                 lambda_reg=1e2
                                  )
     if not create:
         model_manager.load()
