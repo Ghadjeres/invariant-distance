@@ -4,7 +4,7 @@ import os
 from deepPermutations.data_preprocessing import \
     initialize_transposition_dataset
 from deepPermutations.model_manager import ModelManager
-from deepPermutations.sequential_model import InvariantDistanceRelu, Distance
+from deepPermutations.sequential_model import Distance, InvariantDistance
 
 
 def get_arguments():
@@ -16,58 +16,71 @@ def get_arguments():
                         help=f'batch size used during training phase ('
                              f'default: %(default)s)',
                         type=int, default=128)
-    parser.add_argument('-s', '--num_batch_samples',
+    parser.add_argument('-B', '--batches_per_epoch',
                         help=f'number of batches per epoch (default: %('
                              f'default)s)',
                         type=int, default=100)
+    parser.add_argument('-L', '--num_layers',
+                        help=f'number of LSTM layers (default: %('
+                             f'default)s)',
+                        type=int, default=2)
     parser.add_argument('--num_val_batch_samples',
                         help=f'number of validation batch samples '
                              f'(default: %(default)s)',
                         type=int, default=2560)
-    parser.add_argument('-u', '--num_units_lstm',
+    parser.add_argument('-u', '--num_lstm_units',
                         help=f'number of lstm units (default: %(default)s)',
-                        type=int, default=512)
-    parser.add_argument('-d', '--num_dense',
-                        help=f'size of non recurrent hidden layers '
-                             f'(default: %(default)s)',
                         type=int, default=256)
-    parser.add_argument('-n', '--name',
-                        help='model name (default: %(default)s)',
-                        choices=['relu', 'norelu'],
-                        type=str, default='relu')
-    parser.add_argument('-i', '--num_iterations',
-                        help=f'number of gibbs iterations (default: %('
+    parser.add_argument('-d', '--input_dropout',
+                        help=f'dropout on input (default: %(default)s)',
+                        type=float, default=0.001)
+    parser.add_argument('-D', '--dropout_lstm',
+                        help=f'dropout between LSTM layers (default: %('
                              f'default)s)',
-                        type=int, default=20000)
+                        type=float, default=0.001)
+    parser.add_argument('-i', '--invariant', nargs='?',
+                        help=f'if True, use transposition-invariant distance '
+                             f'model',
+                        default=False, const=True)
     parser.add_argument('-t', '--train', nargs='?',
                         help='train models for N epochs (default: 15)',
                         default=0, const=15, type=int)
-    parser.add_argument('-p', '--parallel', nargs='?',
-                        help='number of parallel updates (default: 16)',
-                        type=int, const=16, default=1)
     parser.add_argument('--overwrite',
                         help='overwrite previously computed models',
                         action='store_true')
-    parser.add_argument('-m', '--midi_file', nargs='?',
-                        help='relative path to midi file',
-                        type=str, const='datasets/god_save_the_queen.mid')
-    parser.add_argument('-l', '--length',
-                        help='length of unconstrained generation',
-                        type=int, default=160)
-    parser.add_argument('--ext',
-                        help='extension of model name',
-                        type=str, default='')
-    parser.add_argument('-o', '--output_file', nargs='?',
-                        help='path to output file',
-                        type=str, default='',
-                        const='generated_examples/example.mid')
     parser.add_argument('--dataset', nargs='?',
                         help='path to dataset folder',
                         type=str, default='')
-    parser.add_argument('-r', '--reharmonization', nargs='?',
-                        help=f'reharmonization of a melody from the corpus '
-                             f'identified by its id',
-                        type=int)
+    parser.add_argument('-r', '--ReLU', nargs='?',
+                        help=f'add ReLU on hidden representation',
+                        default=None, const='ReLU'
+                        )
+    parser.add_argument('-s', '--stats', nargs='?',
+                        help=f'compute stats on N randomly drawn sequences',
+                        default=0, const=10000, type=int
+                        )
+    parser.add_argument('-f', '--find_nearest', nargs='?',
+                        help=f'find nearest neighbors',
+                        default=0, const=10000, type=int
+                        )
+    parser.add_argument('-p', '--permutation_distance', nargs='?',
+                        help=f'distance used in stats or nearest neighbors',
+                        choices=['spearman', 'kendall', 'edit'],
+                        default='spearman', type=str
+                        )
+    parser.add_argument('-l', '--l_truncation', nargs='?',
+                        help=f'l truncation parameter',
+                        default=None, const=128
+                        )
+    parser.add_argument('--norm', nargs='?',
+                        help=f'regularization norm',
+                        default=None, const='l1',
+                        choices=['l1', 'l2']
+                        )
+    parser.add_argument('-c', '--create', nargs='?',
+                        help=f'if True, create a new model',
+                        default=False, const=True)
+
     args = parser.parse_args()
     print(args)
     return args
@@ -76,25 +89,41 @@ def get_arguments():
 if __name__ == '__main__':
     # Parse args
     args = get_arguments()
-    if args.ext:
-        ext = '_' + args.ext
-    else:
-        ext = ''
-    timesteps = args.timesteps
+
+    # training parameters
     batch_size = args.batch_size_train
-    batches_per_epoch = args.num_batch_samples
+    batches_per_epoch = args.batches_per_epoch
     nb_val_batch_samples = args.num_val_batch_samples
-
-    num_units_lstm = args.num_units_lstm
-    model_name = args.name.lower()
-    sequence_length = args.length
-    batch_size_per_voice = args.parallel
-    num_units_lstm = args.num_units_lstm
-    num_dense = args.num_dense
-
     train = args.train > 0
     num_epochs = args.train
     overwrite = args.overwrite
+
+    # model parameters
+    is_invariant = args.invariant
+    timesteps = args.timesteps
+    num_lstm_units = args.num_lstm_units
+    non_linearity = args.ReLU
+    input_dropout = args.input_dropout
+    dropout_prob = args.dropout_lstm
+    num_layers = args.num_layers
+    reg_norm = args.norm
+    create = args.create
+
+    # dataset parameters
+    num_pitches = 55
+
+    # permutation distance parameters
+    permutation_distance = args.permutation_distance
+    l_truncation = args.l_truncation
+    if l_truncation is not None:
+        l_truncation = int(l_truncation)
+
+
+    # visualizations
+    compute_stats = args.stats > 0
+    num_elements_stats = args.stats
+    compute_nearests = args.find_nearest > 0
+    num_elements_nearest = args.find_nearest
 
     # create dataset if doesn't exist
     dataset_name = 'transpose/bach_sop'
@@ -108,75 +137,69 @@ if __name__ == '__main__':
             dataset_dir=None,
             metadatas=metadatas)
 
-    # INVARIANT DISTANCE
+    # DISTANCE
+    if is_invariant:
+        distance = InvariantDistance(
+            dataset_name=pickle_filepath,
+            timesteps=timesteps,
+            num_pitches=num_pitches,
+            num_lstm_units=num_lstm_units,
+            dropout_prob=dropout_prob,
+            input_dropout=input_dropout,
+            num_layers=num_layers,
+            embedding_dim=16,
+            non_linearity=non_linearity,
+            reg_norm=reg_norm
+        )
+    else:
+        distance = Distance(
+            dataset_name=pickle_filepath,
+            timesteps=timesteps,
+            num_pitches=num_pitches,
+            num_lstm_units=num_lstm_units,
+            dropout_prob=dropout_prob,
+            input_dropout=input_dropout,
+            num_layers=num_layers,
+            embedding_dim=16,
+            non_linearity=non_linearity
+        )
 
-    distance_model_kwargs = dict(
-        reg=None,
-        dropout_prob=0.3,
-        num_layers=2,
-        num_units_lstm=num_units_lstm,
-        input_dropout=0.3,
-    )
-
-    # invariant_distance = InvariantDistance(
-    #     dataset_name=pickle_filepath,
-    #     timesteps=timesteps,
-    #     num_pitches=55,
-    #     **distance_model_kwargs
-    # )
-
-    # invariant_distance = InvariantDistanceRelu(
-    #     dataset_name=pickle_filepath,
-    #     timesteps=timesteps,
-    #     num_pitches=55,
-    #     mlp_hidden_size=num_dense,
-    #     **distance_model_kwargs
-    # )
-
-
-    invariant_distance = Distance(
-        dataset_name=pickle_filepath,
-        timesteps=timesteps,
-        num_pitches=55,
-        mlp_hidden_size=num_dense,
-        relu=True,
-        **distance_model_kwargs
-    )
-
-
-    # gen = invariant_distance.generator(batch_size=batch_size,
-    #                                    phase='all',
-    #                                    )
-    # next(gen)
-
-    model_manager = ModelManager(model=invariant_distance,
-                                 lr=1e-3,
-                                 lambda_reg=1.
+    model_manager = ModelManager(model=distance,
+                                 lr=1e-4,
+                                 lambda_reg=1e2
                                  )
-    model_manager.load()
+    if not create:
+        model_manager.load()
+
     if train:
         model_manager.train_model(batch_size=batch_size,
                                   num_epochs=num_epochs,
                                   batches_per_epoch=batches_per_epoch,
                                   plot=True,
-                                  save_every=2,
-                                  reg_norm=None
+                                  save_every=2
                                   )
 
-    invariant_distance.find_nearests_all(
-        target_seq=None,
-        show_results=True
-    )
+    if compute_stats:
+        distance.compute_stats(
+            num_elements=num_elements_stats,
+            permutation_distance=permutation_distance,
+            l_truncation=l_truncation,
+            plot=False)
+
+    if compute_nearests:
+        target_seq = distance.target_seq()
+        distance.find_nearests_all(
+            target_seq=target_seq,
+            show_results=True,
+            num_nearests=num_elements_nearest,
+            permutation_distance=permutation_distance,
+            l_truncation=l_truncation
+        )
     exit()
 
-    invariant_distance.find_nearests(
-        target_seq=None,
-        show_results=True,
-        num_elements=20000)
-    # todo show pred
     # invariant_distance_model.test_transpose_out_of_bounds(
     #     effective_timestep=32)
-    invariant_distance.compute_stats(chorale_index=0, num_elements=10000)
+
     invariant_distance.show_mean_distance_matrix(chorale_index=241,
                                                  show_plot=True)
     # invariant_distance_model.show_mean_distance_matrix(chorale_index=0,
